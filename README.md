@@ -20,8 +20,8 @@ Each folder contains its own scripts, configurations, and documentation for runn
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/AdityaNarayan001/CPT-LoRA_FineTuning_Scripts.git
-   cd CPT-LoRA_FineTuning_Scripts
+   git clone https://github.com/xynehq/code-trainer.git
+   cd code-trainer
    ```
 
 2. **Install dependencies:**  
