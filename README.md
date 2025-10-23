@@ -33,7 +33,3 @@ Each folder contains its own scripts, configurations, and documentation for runn
 ## Contribution
 
 Contributions, suggestions, and feature requests are welcome! Feel free to open issues or submit pull requests to improve this repository.
-
----
-
-For questions or support, please contact [AdityaNarayan001](https://github.com/AdityaNarayan001).
