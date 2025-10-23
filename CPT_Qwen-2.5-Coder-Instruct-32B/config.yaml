@@ -1,0 +1,101 @@
+# =================================================
+# CPT Configuration for Hyperswitch Rust Repository
+# =================================================
+
+repository:
+  name: "hyperswitch"
+  path: "/workspace/RL_Code/CPT/hyperswitch"
+  language: "rust"
+
+model:
+  name: "Qwen/Qwen2.5-Coder-32B-Instruct"
+  size: "32B"
+  type: "instruct"  
+
+training:
+  lora:
+    r: 64 
+    alpha: 128 
+    dropout: 0.05   
+    target_modules:       
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+
+  num_epochs: 5
+  micro_batch_size: 2
+  gradient_accumulation_steps: 8
+  eval_batch_size: 1
+  learning_rate: 0.00005
+  lr_scheduler: "cosine"
+  warmup_ratio: 0.02
+  weight_decay: 0.1
+  max_grad_norm: 0.5
+  
+  bf16: true
+  fp16: false
+  tf32: true
+  
+  logging_steps: 10
+  save_steps: 50
+  eval_steps: 25
+  
+  gradient_checkpointing: true
+  sample_packing: false
+  
+dataset:
+  output_dir: "/workspace/RL_Code/CPT/dataset"
+  train_split: 0.90
+  val_split: 0.10
+  random_seed: 42
+  
+  max_tokens: 8192         
+  overlap_tokens: 512     
+  
+  modes:
+    - "full_file"           
+    - "function_focus"
+    - "dependency_map"
+    - "api_catalog"
+
+  include:
+    - "*.rs"               
+    - "!**/target/**"     
+    - "!**/*.gen.rs"        
+    - "!**/generated/**"    
+  
+  include_tests: true      
+  
+  augmentation:
+    add_file_path: true         
+    add_module_context: true
+    extract_functions: true
+    extract_structs: true
+    extract_traits: true
+    add_dependencies: true
+    add_cross_references: true  
+    
+preprocessing:
+  keep_comments: true       
+  keep_docstrings: true     
+  keep_attributes: true    
+  
+  remove_debug_prints: false  
+  normalize_whitespace: true  
+  max_blank_lines: 2         
+  
+  tokenizer: "Qwen/Qwen2.5-Coder-32B-Instruct"
+
+output:
+  format: "jsonl"         
+  fields:
+    - "text"
+    - "file_path"
+    - "module"
+    - "tokens"
+    - "type"
+    - "metadata"

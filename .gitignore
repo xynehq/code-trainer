@@ -1,0 +1,59 @@
+# Large model outputs and checkpoints (CPT specific)
+outputs/
+hyperswitch-qwen-*-merged/
+*.bin
+*.safetensors
+*.pth
+*.pt
+
+# Dataset files (regenerate with prepare_dataset.py)
+dataset/
+hyperswitch/
+
+# HuggingFace cache
+.cache/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# TensorBoard and training logs
+runs/
+train_log.txt
+logs/*.log
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# System files
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
