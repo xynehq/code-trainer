@@ -1,6 +1,6 @@
 # CPT-LoRA Fine-Tuning Scripts
 
-This repository provides scripts and resources for fine-tuning CPT (Chinese Pre-trained Transformer) models using LoRA (Low-Rank Adaptation) methods, focusing on flexibility, efficiency, and reproducibility.
+This repository provides scripts and resources for fine-tuning CPT (Continued Pre-training) models using LoRA (Low-Rank Adaptation) methods, focusing on flexibility, efficiency, and reproducibility.
 
 ## Repository Structure
 
