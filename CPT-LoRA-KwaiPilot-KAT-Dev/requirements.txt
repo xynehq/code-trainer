@@ -16,3 +16,9 @@ flash-attn>=2.3.0
 
 # Monitoring
 tensorboard
+
+# --- TPU (XLA) environment notes ---
+# Do NOT install deepspeed/flash-attn on TPU. Instead install torch-xla
+# with versions matching torch/torchvision on your TPU VM, e.g.:
+# pip install torch==2.5.1 torchvision==0.20.1
+# pip install torch-xla[tpu]==2.5.1

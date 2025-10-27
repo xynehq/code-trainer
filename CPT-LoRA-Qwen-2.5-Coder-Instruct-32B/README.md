@@ -55,6 +55,21 @@ chmod +x train_direct.sh
 ./train_direct.sh
 ```
 
+### TPU (XLA) Training
+- Environment: Cloud TPU VM or TPU-backed VM with PyTorch/XLA installed.
+- Install matching versions: `pip install torch==2.5.1 torchvision==0.20.1 && pip install torch-xla[tpu]==2.5.1`
+- FlashAttention/DeepSpeed are disabled automatically on TPU.
+```bash
+# Make script executable
+chmod +x train_tpu.sh
+
+# Launch across 8 TPU cores
+./train_tpu.sh
+```
+Notes:
+- The trainer auto-detects TPU and sets `tpu_num_cores=8`, disables `deepspeed`, and avoids CUDA-only features.
+- Use BF16 on TPU (`bf16: true` in config). `fp16` is ignored on TPU.
+
 ### 6. Monitor Training (Optional)
 ```bash
 # In a separate terminal - TensorBoard
@@ -93,6 +108,8 @@ watch -n 1 nvidia-smi
 - BF16 precision
 - No CPU offloading
 - Flash Attention 2 enabled
+
+On TPU: DeepSpeed is not used and FlashAttention is not available; the script falls back to standard attention and XLA.
 
 ## File Structure
 

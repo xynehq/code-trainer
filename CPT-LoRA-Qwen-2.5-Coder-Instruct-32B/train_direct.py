@@ -35,6 +35,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def is_tpu_available():
+    try:
+        import torch_xla.core.xla_model as xm  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 def load_config():
     """Load configuration from YAML file"""
     with open('config.yaml', 'r') as f:
@@ -336,7 +344,10 @@ def main():
     
     logger.info("=" * 80)
     logger.info("Hyperswitch CPT Training - Direct Implementation")
-    logger.info("Using: Transformers + TRL + PEFT + DeepSpeed")
+    if is_tpu_available():
+        logger.info("Using: Transformers + TRL + PEFT on TPU (XLA)")
+    else:
+        logger.info("Using: Transformers + TRL + PEFT + DeepSpeed")
     logger.info("=" * 80)
     
     model_name = TRAINING_CONFIG['base_model']
@@ -377,11 +388,15 @@ def main():
     logger.info(f"  Validation samples ({TRAINING_CONFIG['val_split']*100:.0f}%): {len(eval_dataset):,}")
     
     logger.info("[3/5] Loading model...")
+    model_kwargs = dict(
+        dtype=torch.bfloat16,
+        trust_remote_code=True,
+    )
+    if not is_tpu_available():
+        model_kwargs["attn_implementation"] = "flash_attention_2"
     model = AutoModelForCausalLM.from_pretrained(
         TRAINING_CONFIG['base_model'],
-        dtype=torch.bfloat16,  
-        trust_remote_code=True,
-        attn_implementation="flash_attention_2",  
+        **model_kwargs,
     )
     model.config.use_cache = False
     
@@ -408,6 +423,7 @@ def main():
     logger.info(f"  Trainable params: {trainable_params:,} ({100 * trainable_params / total_params:.2f}%)")
     
     logger.info("\n[5/5] Setting up training...")
+    using_tpu = is_tpu_available()
     training_args = TrainingArguments(
         output_dir=output_dir,
         
@@ -425,8 +441,8 @@ def main():
         max_grad_norm=TRAINING_CONFIG['max_grad_norm'],
         
         bf16=TRAINING_CONFIG['bf16'],
-        fp16=TRAINING_CONFIG['fp16'],
-        tf32=TRAINING_CONFIG['tf32'],
+        fp16=False,
+        tf32=TRAINING_CONFIG['tf32'] if not using_tpu else False,
         
         logging_steps=TRAINING_CONFIG['logging_steps'],
         logging_dir=f"{output_dir}/logs",
@@ -441,13 +457,15 @@ def main():
         
         gradient_checkpointing=TRAINING_CONFIG['gradient_checkpointing'],
         
-        deepspeed="deepspeed_configs/zero2.json",
+        deepspeed=None if using_tpu else "deepspeed_configs/zero2.json",
         
-        dataloader_num_workers=4,
-        dataloader_pin_memory=True,
+        dataloader_num_workers=0 if using_tpu else 4,
+        dataloader_pin_memory=False if using_tpu else True,
         remove_unused_columns=False,
         ddp_find_unused_parameters=False,
         seed=TRAINING_CONFIG['seed'],
+        
+        tpu_num_cores=8 if using_tpu else None,
     )
     
     logger.info(f"  Effective batch size: {training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps * training_args.world_size}")
