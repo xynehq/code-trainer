@@ -47,6 +47,10 @@ training:
   gradient_checkpointing: true
   sample_packing: false
   
+  # TPU sharding via XLA FSDP
+  xla_fsdp: true
+  xla_fsdp_min_num_params: 100000000
+  
 dataset:
   output_dir: "/workspace/RL_Code/CPT/dataset"
   train_split: 0.90

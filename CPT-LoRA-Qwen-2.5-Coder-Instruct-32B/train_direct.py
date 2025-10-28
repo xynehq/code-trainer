@@ -34,6 +34,21 @@ logging.getLogger("accelerate.accelerator").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Optional XLA FSDP imports (for TPU model sharding)
+try:
+    from torch_xla.distributed.fsdp import XlaFullyShardedDataParallel as XlaFSDP  # type: ignore
+    from torch_xla.distributed.fsdp import ShardingStrategy as XlaShardingStrategy  # type: ignore
+    from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy  # type: ignore
+    ShardingStrategy = XlaShardingStrategy
+except Exception:
+    try:
+        from torch.distributed.fsdp import ShardingStrategy  # type: ignore
+        from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy  # type: ignore
+    except Exception:
+        ShardingStrategy = None
+        size_based_auto_wrap_policy = None
+    XlaFSDP = None
+
 
 def is_tpu_available():
     try:
@@ -97,6 +112,9 @@ def get_training_config():
         'gradient_checkpointing': training_config.get('gradient_checkpointing', True),
         
         'seed': dataset_config.get('random_seed', 42),
+        # TPU sharding (XLA FSDP)
+        'xla_fsdp': training_config.get('xla_fsdp', True),
+        'xla_fsdp_min_num_params': training_config.get('xla_fsdp_min_num_params', 100_000_000),  # wrap modules >100M params
     }
 
 
@@ -422,8 +440,31 @@ def main():
     logger.info(f"  Target modules: {len(lora_config.target_modules)}")
     logger.info(f"  Trainable params: {trainable_params:,} ({100 * trainable_params / total_params:.2f}%)")
     
-    logger.info("\n[5/5] Setting up training...")
+    # Optionally shard model weights across TPU cores via XLA FSDP
+    # Wrapping happens after PEFT so adapters are included in the graph.
+    # If you see PEFT+FSDP incompatibilities, consider PEFT's native FSDP path.
     using_tpu = is_tpu_available()
+    if using_tpu and TRAINING_CONFIG.get('xla_fsdp', True):
+        if XlaFSDP is None or size_based_auto_wrap_policy is None or ShardingStrategy is None:
+            logger.warning("XLA FSDP not available; proceeding without model sharding on TPU.")
+        else:
+            try:
+                min_params = int(TRAINING_CONFIG.get('xla_fsdp_min_num_params', 100_000_000))
+                auto_wrap_policy = size_based_auto_wrap_policy(min_num_params=min_params)
+                logger.info(f"\n[TPU] Enabling XLA FSDP sharding (min_params={min_params:,})...")
+                model = XlaFSDP(
+                    model,
+                    auto_wrap_policy=auto_wrap_policy,
+                    sharding_strategy=ShardingStrategy.FULL_SHARD,
+                    use_orig_params=True,
+                    sync_module_states=True,
+                    limit_all_gathers=True,
+                )
+                logger.info("[TPU] XLA FSDP wrapping complete")
+            except Exception as e:
+                logger.warning(f"[TPU] Failed to enable XLA FSDP ({e}); continuing without sharding")
+
+    logger.info("\n[5/5] Setting up training...")
     training_args = TrainingArguments(
         output_dir=output_dir,
         

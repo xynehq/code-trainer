@@ -4,7 +4,7 @@
 
 repository:
   name: "hyperswitch"
-  path: "/workspace/RL_Code/CPT/hyperswitch"
+  path: "/Users/zereraz/Code/Juspay/code-trainer/CPT-LoRA-KwaiPilot-KAT-Dev/hyperswitch"
   language: "rust"
 
 model:
@@ -47,8 +47,12 @@ training:
   gradient_checkpointing: true
   sample_packing: false
   
+  # TPU sharding via XLA FSDP
+  xla_fsdp: true
+  xla_fsdp_min_num_params: 100000000
+  
 dataset:
-  output_dir: "/workspace/RL_Code/CPT/dataset"
+  output_dir: "/Users/zereraz/Code/Juspay/code-trainer/CPT-LoRA-KwaiPilot-KAT-Dev/dataset"
   train_split: 0.90
   val_split: 0.10
   random_seed: 42
