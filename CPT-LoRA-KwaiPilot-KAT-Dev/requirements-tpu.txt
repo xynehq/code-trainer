@@ -1,0 +1,33 @@
+# TPU-specific dependencies
+# Install AFTER checking your PyTorch version: python -c "import torch; print(torch.__version__)"
+
+# Core dependencies (shared with GPU)
+transformers>=4.36.0
+accelerate>=0.25.0
+peft>=0.7.0
+trl>=0.7.0
+
+# Dataset Preparation
+pyyaml>=6.0
+tqdm>=4.65.0
+datasets>=2.14.0
+
+# Monitoring
+tensorboard
+
+# TPU/XLA specific - match versions to your PyTorch installation
+# For PyTorch 2.5.1 (common on v5litepod):
+torch==2.5.1
+torchvision==0.20.1
+torch-xla[tpu]==2.5.1
+cloud-tpu-client
+
+# For PyTorch 2.4.0 (if your TPU VM has this):
+# torch==2.4.0
+# torchvision==0.19.0
+# torch-xla[tpu]==2.4.0
+# cloud-tpu-client
+
+# NOTE: Do NOT install these on TPU (GPU-only):
+# - deepspeed
+# - flash-attn

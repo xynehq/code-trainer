@@ -34,7 +34,9 @@ PY
 status=$?
 if [ $status -ne 0 ]; then
   echo -e "${RED}✗ Missing TPU deps. Install torch-xla matched to torch.${NC}"
-  echo "Example (TPU VM): pip install torch==2.5.1 torchvision==0.20.1 && pip install torch-xla[tpu]==2.5.1"
+  echo -e "${YELLOW}First check PyTorch version:${NC} python -c \"import torch; print(torch.__version__)\""
+  echo -e "${YELLOW}Then install:${NC} pip install -r requirements-tpu.txt"
+  echo -e "${YELLOW}Or manually:${NC} pip install torch==2.5.1 torchvision==0.20.1 torch-xla[tpu]==2.5.1"
   exit 1
 fi
 echo -e "${GREEN}✓${NC} TPU dependencies available"
