@@ -10,7 +10,6 @@ import logging
 import subprocess
 import argparse
 
-# Suppress tokenizer parallelism warnings when using git subprocess
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 logging.basicConfig(
@@ -21,18 +20,16 @@ logger = logging.getLogger(__name__)
 
 
 class EnhancedDatasetPreparator:
-    """
-    Enhanced dataset preparator for CPT training - supports multiple repos and languages
-    Generates both file-level chunks AND granular function/struct/trait data (Rust only)
-    """
+    """Enhanced dataset preparator for CPT training - supports multiple repos and languages
+    Generates both file-level chunks AND granular function/struct/trait data (Rust only)"""
     
     def __init__(self, config_path: str = "config.yaml", repo_urls: List[str] = None, enable_granular_all: bool = False):
         """Initialize dataset preparator with optional repo URLs and granular flag"""
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
-        
+
         repo_config = self.config['repository']
-        
+
         if repo_urls:
             self.repo_paths = []
             for url in repo_urls:
@@ -53,19 +50,19 @@ class EnhancedDatasetPreparator:
             self.repo_paths = [Path(repo_config['path'])]
         else:
             raise ValueError("No repository path(s) or URL(s) found in config or command-line")
-        
+
         self.languages = self.config['dataset'].get('languages', ['rust'])
-        
+
         self.enable_granular_all = enable_granular_all
-        
+
         self.output_dir = Path(self.config['dataset']['output_dir'])
         self.max_tokens = self.config['dataset']['max_tokens']
         self.overlap_tokens = self.config['dataset']['overlap_tokens']
-        
+
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.tokenizer = None
-        
+
         logger.info(f"Configured for {len(self.repo_paths)} repository(ies)")
         logger.info(f"Processing languages: {', '.join(self.languages)}")
         if self.enable_granular_all:
@@ -988,7 +985,6 @@ class EnhancedDatasetPreparator:
         logger.info(f"✓ Created {len(all_granular_samples)} granular samples")
         logger.info(f"✓ Total: {len(all_file_samples) + len(all_granular_samples)} samples")
         
-        # Extract git commit history if configured
         if self.config['dataset'].get('include_commits', False):
             logger.info("\n=== Extracting Git Commit History ===")
             commit_days = self.config['dataset'].get('commit_history_days', 365)
@@ -1089,7 +1085,6 @@ class EnhancedDatasetPreparator:
         logger.info(f"    └─ File-level: {stats['file_level_samples']:,}")
         logger.info(f"    └─ Granular: {stats['granular_samples']:,}")
         
-        # Show commit samples if present
         commit_count = stats['sample_types'].get('git_commit', 0)
         if commit_count > 0:
             logger.info(f"    └─ Git commits: {commit_count:,}")
@@ -1174,7 +1169,6 @@ def main():
     
     args = parser.parse_args()
     
-    # Initialize preparator with CLI arguments
     preparator = EnhancedDatasetPreparator(
         config_path=args.config,
         repo_urls=args.repos,
