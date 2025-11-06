@@ -12,6 +12,9 @@ This folder includes scripts and resources designed for fine-tuning CPT models i
 ### 2. [`CPT_Qwen-2.5-Coder-Instruct-32B`](https://github.com/AdityaNarayan001/CPT-LoRA_FineTuning_Scripts/tree/main/CPT_Qwen-2.5-Coder-Instruct-32B)
 This folder focuses on fine-tuning CPT models using the Qwen-2.5-Coder-Instruct-32B configuration or dataset. The scripts here are likely specialized for instruction-based or coder-centric training workflows.
 
+### 3. [`EulerDatasetGen`](./EulerDatasetGen)
+This folder contains tools for downloading Haskell packages from Hackage and preparing them into training datasets for Large Language Models (LLMs). It provides automated package downloading, source code processing, and dataset preparation optimized for Continued Pre-Training (CPT) tasks with memory-efficient streaming processing.
+
 ---
 
 Each folder contains its own scripts, configurations, and documentation for running experiments and training models.

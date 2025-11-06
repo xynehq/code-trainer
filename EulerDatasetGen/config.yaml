@@ -1,0 +1,14 @@
+repository:
+  paths:
+    - "HS_packages"
+
+dataset:
+  output_dir: "haskell_dataset"
+  data_file: "all_data.jsonl"
+  max_tokens: 8192              # 2048
+  overlap_tokens: 200
+  random_seed: 42
+  include_tests: false
+
+model:
+  name: "zai-org/GLM-4.5-Air"

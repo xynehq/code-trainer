@@ -1,0 +1,54 @@
+# Downloaded Haskell packages
+HS_packages/
+
+# Generated datasets
+haskell_dataset/
+*.jsonl
+dataset_stats.json
+
+# Failed packages list
+failed_packages.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+
+# Model cache (transformers)
+.cache/
