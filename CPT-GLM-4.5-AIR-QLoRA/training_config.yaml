@@ -1,0 +1,62 @@
+# GLM-4.5-Air QLoRA Training Configuration
+# This file contains all hyperparameters and paths for reproducible training
+
+# Model and Data Paths
+paths:
+  model_path: "/workspace/Avinash/models/GLM-4.5-Air"
+  data_path: "/workspace/Avinash/dataset/all_data.jsonl"
+  output_dir: "glm45-air-cpt-qlora-2"  # Output directory for checkpoints and logs
+  best_adapter_dir: "best-glm45-adapter"
+
+# Training Configuration
+training:
+  num_epochs: 3
+  seed: 42
+  max_seq_length: 4096
+  train_val_split: 0.9  # 90% train, 10% validation
+
+# Batch and Optimization
+optimization:
+  micro_batch_per_gpu: 1
+  grad_accum_steps: 16
+  learning_rate: 5.0e-6
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  warmup_ratio: 0.08  # 8% of total updates (optimal for MoE + 4-bit)
+  betas: [0.9, 0.95]
+  eps: 1.0e-8
+
+# LoRA Configuration
+lora:
+  r: 64
+  lora_alpha: 128
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+  lora_dropout: 0.05
+  bias: "none"
+
+# Quantization (QLoRA)
+quantization:
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: "float32"
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_quant_type: "nf4"
+
+# Logging and Checkpointing
+logging:
+  log_interval: 10          # Log training metrics every N steps
+  eval_interval: 1000        # Run validation every N steps
+  checkpoint_interval: 1000 # Save checkpoint every N steps
+  max_checkpoints: 8        # Keep only top K checkpoints
+
+# Memory Optimization
+memory:
+  use_cpu_offload: true
+  use_deepspeed_zero3: true
+  gradient_checkpointing: true
+  use_cache: false
+
+# Performance
+performance:
+  allow_tf32: true
+  num_workers: 4
+  pin_memory: true

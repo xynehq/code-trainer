@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GLM-4.5-Air Enhanced Training Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2E86AB 0%, #1a5276 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .header .subtitle {
+            font-size: 0.9em;
+            margin-top: 10px;
+            opacity: 0.8;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 15px;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+        }
+        
+        .stat-card.highlight {
+            border: 2px solid #06A77D;
+        }
+        
+        .stat-label {
+            font-size: 0.85em;
+            color: #666;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+        
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #2E86AB;
+        }
+        
+        .stat-unit {
+            font-size: 0.6em;
+            color: #999;
+        }
+        
+        .stat-subtext {
+            margin-top: 5px;
+            color: #666;
+            font-size: 0.85em;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 25px;
+            background: #e0e0e0;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-top: 8px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #06A77D 0%, #04d99d 100%);
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 0.85em;
+        }
+        
+        .section-title {
+            background: #f8f9fa;
+            padding: 15px 30px;
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #2E86AB;
+            border-top: 2px solid #e0e0e0;
+        }
+        
+        .plots-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        .plot-card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .plot-card img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        .checkpoint-panel {
+            padding: 20px;
+            background: white;
+        }
+        
+        .checkpoint-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        
+        .checkpoint-table th {
+            background: #2E86AB;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        .checkpoint-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .checkpoint-table tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .best-badge {
+            background: #06A77D;
+            color: white;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+        
+        .event-timeline {
+            padding: 20px;
+            background: white;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .event-item {
+            padding: 12px;
+            margin-bottom: 10px;
+            border-left: 4px solid #2E86AB;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+        
+        .event-item.evaluation {
+            border-left-color: #F18F01;
+        }
+        
+        .event-item.checkpoint {
+            border-left-color: #06A77D;
+        }
+        
+        .event-item.best_checkpoint {
+            border-left-color: #FFD700;
+            background: #fffbf0;
+        }
+        
+        .event-item.warning {
+            border-left-color: #C73E1D;
+            background: #fff5f5;
+        }
+        
+        .event-icon {
+            font-size: 1.2em;
+            margin-right: 8px;
+        }
+        
+        .event-message {
+            font-size: 0.95em;
+            color: #333;
+        }
+        
+        .event-meta {
+            font-size: 0.8em;
+            color: #999;
+            margin-top: 5px;
+        }
+        
+        .gpu-panel {
+            padding: 20px;
+            background: white;
+        }
+        
+        .gpu-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        
+        .gpu-name {
+            font-weight: bold;
+            color: #2E86AB;
+            margin-bottom: 8px;
+        }
+        
+        .gpu-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+        
+        .gpu-stat {
+            font-size: 0.9em;
+        }
+        
+        .gpu-stat-label {
+            color: #666;
+            font-size: 0.85em;
+        }
+        
+        .gpu-stat-value {
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 50px;
+            font-size: 1.2em;
+            color: #666;
+        }
+        
+        .loading::after {
+            content: '...';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+        
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+        
+        .error {
+            text-align: center;
+            padding: 50px;
+            color: #c73e1d;
+            font-size: 1.1em;
+        }
+        
+        .last-update {
+            text-align: center;
+            padding: 15px;
+            color: #666;
+            font-size: 0.9em;
+            background: #f8f9fa;
+            border-top: 2px solid #e0e0e0;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin-top: 8px;
+        }
+        
+        .status-training {
+            background: #06A77D;
+            color: white;
+        }
+        
+        .status-warmup {
+            background: #F18F01;
+            color: white;
+        }
+        
+        .status-live {
+            background: #2E86AB;
+            color: white;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        .two-column {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        @media (max-width: 1200px) {
+            .two-column {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.8em;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .plots-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .metric-change {
+            font-size: 0.8em;
+            margin-left: 5px;
+        }
+        
+        .metric-up {
+            color: #C73E1D;
+        }
+        
+        .metric-down {
+            color: #06A77D;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 GLM-4.5-Air Enhanced Training Dashboard</h1>
+            <p>100B MoE Model - QLoRA Fine-tuning</p>
+            <p class="subtitle">Auto-refreshing every {{ refresh_interval }} seconds | Real-time monitoring with zero training impact</p>
+        </div>
+        
+        <!-- Main Stats -->
+        <div class="stats-grid" id="stats">
+            <div class="loading">Loading statistics</div>
+        </div>
+        
+        <!-- Best Model Card -->
+        <div class="section-title">🏆 Best Model & Validation Metrics</div>
+        <div class="stats-grid" id="best-stats">
+            <div class="loading">Loading best model info</div>
+        </div>
+        
+        <!-- Gradient & Optimization Health -->
+        <div class="section-title">⚙️ Optimization Health</div>
+        <div class="stats-grid" id="grad-stats">
+            <div class="loading">Loading gradient stats</div>
+        </div>
+        
+        <!-- Training Plots -->
+        <div class="section-title">📊 Training Metrics</div>
+        <div class="plots-grid" id="plots">
+            <div class="loading">Loading plots</div>
+        </div>
+        
+        <!-- Validation Plots -->
+        <div class="section-title">📈 Validation Metrics</div>
+        <div class="plots-grid" id="val-plots">
+            <div class="loading">Loading validation plots</div>
+        </div>
+        
+        <!-- Two Column Layout: Events & Checkpoints -->
+        <div class="two-column">
+            <div>
+                <div class="section-title">📜 Event Timeline</div>
+                <div class="event-timeline" id="events">
+                    <div class="loading">Loading events</div>
+                </div>
+            </div>
+            
+            <div>
+                <div class="section-title">💾 Checkpoints</div>
+                <div class="checkpoint-panel" id="checkpoints">
+                    <div class="loading">Loading checkpoints</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- GPU Stats (if available) -->
+        <div class="section-title">🖥️ GPU Resources</div>
+        <div class="gpu-panel" id="gpu-stats">
+            <div class="loading">Loading GPU stats</div>
+        </div>
+        
+        <div class="last-update" id="last-update"></div>
+    </div>
+    
+    <script>
+        const REFRESH_INTERVAL = {{ refresh_interval }} * 1000;
+        
+        function formatNumber(num) {
+            return num.toLocaleString();
+        }
+        
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleString();
+        }
+        
+        function updateDashboard() {
+            // Fetch main statistics
+            fetch('/api/stats')
+                .then(response => {
+                    if (!response.ok) throw new Error('No data available');
+                    return response.json();
+                })
+                .then(data => {
+                    // Main stats
+                    const statsHtml = `
+                        <div class="stat-card">
+                            <div class="stat-label">Training Progress</div>
+                            <div class="stat-value">${data.progress}<span class="stat-unit">%</span></div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${data.progress}%">
+                                    ${formatNumber(data.current_step)} / ${formatNumber(data.total_steps)}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-label">Current Loss</div>
+                            <div class="stat-value">${data.loss}</div>
+                            <div class="stat-subtext">${data.aux_loss ? 'Aux: ' + data.aux_loss : ''}</div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-label">Learning Rate</div>
+                            <div class="stat-value" style="font-size: 1.4em;">${data.learning_rate}</div>
+                            <div class="status-badge ${data.warmup_complete ? 'status-training' : 'status-warmup'}">
+                                ${data.warmup_complete ? '✓ Warmup Complete' : `Warmup: ${data.warmup_progress}%`}
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-label">Training Speed</div>
+                            <div class="stat-value">${data.speed}<span class="stat-unit">steps/s</span></div>
+                            <div class="stat-subtext">Avg: ${data.avg_speed} steps/s</div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-label">Time Remaining</div>
+                            <div class="stat-value">${data.eta_hours}<span class="stat-unit">hrs</span></div>
+                            <div class="stat-subtext">${data.eta_days} days</div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-label">Time Elapsed</div>
+                            <div class="stat-value">${data.hours_elapsed}<span class="stat-unit">hrs</span></div>
+                            <div class="stat-subtext">Last: ${data.last_update}</div>
+                            <div class="status-badge status-live">● LIVE</div>
+                        </div>
+                    `;
+                    document.getElementById('stats').innerHTML = statsHtml;
+                    
+                    // Best model stats
+                    const bestStatsHtml = `
+                        <div class="stat-card highlight">
+                            <div class="stat-label">Best Validation Loss</div>
+                            <div class="stat-value">${data.best_eval_loss || 'N/A'}</div>
+                            <div class="stat-subtext">Step: ${data.best_eval_step ? formatNumber(data.best_eval_step) : 'N/A'}</div>
+                        </div>
+                        
+                        <div class="stat-card highlight">
+                            <div class="stat-label">Best Perplexity</div>
+                            <div class="stat-value">${data.best_eval_perplexity || 'N/A'}</div>
+                            <div class="stat-subtext">At best checkpoint</div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-label">Latest Validation Loss</div>
+                            <div class="stat-value">${data.latest_eval_loss || 'N/A'}</div>
+                            <div class="stat-subtext">Step: ${data.latest_eval_step ? formatNumber(data.latest_eval_step) : 'N/A'}</div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-label">Latest Perplexity</div>
+                            <div class="stat-value">${data.latest_eval_perplexity || 'N/A'}</div>
+                            <div class="stat-subtext">Most recent eval</div>
+                        </div>
+                    `;
+                    document.getElementById('best-stats').innerHTML = bestStatsHtml;
+                    
+                    // Gradient stats
+                    const gradStatsHtml = `
+                        <div class="stat-card">
+                            <div class="stat-label">Current Grad Norm</div>
+                            <div class="stat-value">${data.current_grad_norm || 'N/A'}</div>
+                            <div class="stat-subtext">Latest step</div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-label">Avg Grad Norm (100 steps)</div>
+                            <div class="stat-value">${data.avg_grad_norm || 'N/A'}</div>
+                            <div class="stat-subtext">Recent average</div>
+                        </div>
+                    `;
+                    document.getElementById('grad-stats').innerHTML = gradStatsHtml;
+                })
+                .catch(error => {
+                    document.getElementById('stats').innerHTML = 
+                        `<div class="error">⚠️ ${error.message}<br>Waiting for training to start...</div>`;
+                });
+            
+            // Fetch plots
+            fetch('/api/plots')
+                .then(response => {
+                    if (!response.ok) throw new Error('No data available');
+                    return response.json();
+                })
+                .then(data => {
+                    // Training plots
+                    let plotsHtml = '';
+                    if (data.loss) {
+                        plotsHtml += `<div class="plot-card"><img src="data:image/png;base64,${data.loss}" alt="Loss Plot"></div>`;
+                    }
+                    if (data.lr) {
+                        plotsHtml += `<div class="plot-card"><img src="data:image/png;base64,${data.lr}" alt="Learning Rate Plot"></div>`;
+                    }
+                    if (data.grad_norm) {
+                        plotsHtml += `<div class="plot-card"><img src="data:image/png;base64,${data.grad_norm}" alt="Gradient Norm Plot"></div>`;
+                    }
+                    if (data.speed) {
+                        plotsHtml += `<div class="plot-card"><img src="data:image/png;base64,${data.speed}" alt="Speed Plot"></div>`;
+                    }
+                    if (data.eta) {
+                        plotsHtml += `<div class="plot-card"><img src="data:image/png;base64,${data.eta}" alt="ETA Plot"></div>`;
+                    }
+                    document.getElementById('plots').innerHTML = plotsHtml || '<div class="loading">No training plots available</div>';
+                    
+                    // Validation plots
+                    let valPlotsHtml = '';
+                    if (data.val_loss) {
+                        valPlotsHtml += `<div class="plot-card"><img src="data:image/png;base64,${data.val_loss}" alt="Validation Loss Plot"></div>`;
+                    }
+                    if (data.val_ppl) {
+                        valPlotsHtml += `<div class="plot-card"><img src="data:image/png;base64,${data.val_ppl}" alt="Validation Perplexity Plot"></div>`;
+                    }
+                    document.getElementById('val-plots').innerHTML = valPlotsHtml || '<div class="loading">No validation plots available yet</div>';
+                })
+                .catch(error => {
+                    document.getElementById('plots').innerHTML = 
+                        `<div class="error">⚠️ ${error.message}</div>`;
+                });
+            
+            // Fetch checkpoints
+            fetch('/api/checkpoints')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.checkpoints && data.checkpoints.length > 0) {
+                        let tableHtml = `
+                            <table class="checkpoint-table">
+                                <thead>
+                                    <tr>
+                                        <th>Checkpoint</th>
+                                        <th>Step</th>
+                                        <th>Val Loss</th>
+                                        <th>Perplexity</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                        `;
+                        
+                        data.checkpoints.forEach(cp => {
+                            const isBest = data.best_checkpoint && cp.step === data.best_checkpoint.step;
+                            tableHtml += `
+                                <tr>
+                                    <td>${cp.name}</td>
+                                    <td>${formatNumber(cp.step)}</td>
+                                    <td>${cp.eval_loss ? cp.eval_loss.toFixed(4) : 'N/A'}</td>
+                                    <td>${cp.eval_perplexity ? cp.eval_perplexity.toFixed(2) : 'N/A'}</td>
+                                    <td>${isBest ? '<span class="best-badge">🏆 BEST</span>' : ''}</td>
+                                </tr>
+                            `;
+                        });
+                        
+                        tableHtml += '</tbody></table>';
+                        document.getElementById('checkpoints').innerHTML = tableHtml;
+                    } else {
+                        document.getElementById('checkpoints').innerHTML = '<p>No checkpoints available yet</p>';
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('checkpoints').innerHTML = '<p>Error loading checkpoints</p>';
+                });
+            
+            // Fetch events
+            fetch('/api/events')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.events && data.events.length > 0) {
+                        let eventsHtml = '';
+                        data.events.forEach(event => {
+                            eventsHtml += `
+                                <div class="event-item ${event.type}">
+                                    <div>
+                                        <span class="event-icon">${event.icon}</span>
+                                        <span class="event-message">${event.message}</span>
+                                    </div>
+                                    <div class="event-meta">
+                                        Step ${formatNumber(event.step)} | ${formatTimestamp(event.timestamp)}
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        document.getElementById('events').innerHTML = eventsHtml;
+                    } else {
+                        document.getElementById('events').innerHTML = '<p>No events yet</p>';
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('events').innerHTML = '<p>Error loading events</p>';
+                });
+            
+            // Fetch GPU stats
+            fetch('/api/gpu')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.available && data.gpus) {
+                        let gpuHtml = '';
+                        data.gpus.forEach(gpu => {
+                            const memPercent = ((gpu.memory_used / gpu.memory_total) * 100).toFixed(1);
+                            gpuHtml += `
+                                <div class="gpu-card">
+                                    <div class="gpu-name">GPU ${gpu.index}: ${gpu.name}</div>
+                                    <div class="gpu-stats">
+                                        <div class="gpu-stat">
+                                            <div class="gpu-stat-label">Memory</div>
+                                            <div class="gpu-stat-value">${gpu.memory_used} / ${gpu.memory_total} MB (${memPercent}%)</div>
+                                        </div>
+                                        <div class="gpu-stat">
+                                            <div class="gpu-stat-label">Utilization</div>
+                                            <div class="gpu-stat-value">${gpu.utilization}%</div>
+                                        </div>
+                                        <div class="gpu-stat">
+                                            <div class="gpu-stat-label">Temperature</div>
+                                            <div class="gpu-stat-value">${gpu.temperature}°C</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        document.getElementById('gpu-stats').innerHTML = gpuHtml;
+                    } else {
+                        document.getElementById('gpu-stats').innerHTML = '<p>GPU stats unavailable (nvidia-smi not accessible)</p>';
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('gpu-stats').innerHTML = '<p>GPU stats unavailable</p>';
+                });
+            
+            // Update timestamp
+            const now = new Date();
+            document.getElementById('last-update').innerHTML = 
+                `Dashboard updated at ${now.toLocaleTimeString()} | Next refresh in ${REFRESH_INTERVAL/1000}s`;
+        }
+        
+        // Initial update
+        updateDashboard();
+        
+        // Set up auto-refresh
+        setInterval(updateDashboard, REFRESH_INTERVAL);
+        
+        // Update countdown timer
+        let countdown = REFRESH_INTERVAL / 1000;
+        setInterval(() => {
+            countdown--;
+            if (countdown <= 0) {
+                countdown = REFRESH_INTERVAL / 1000;
+            }
+            const updateEl = document.getElementById('last-update');
+            if (updateEl && updateEl.innerHTML) {
+                const now = new Date();
+                updateEl.innerHTML = 
+                    `Dashboard updated at ${now.toLocaleTimeString()} | Next refresh in ${countdown}s`;
+            }
+        }, 1000);
+    </script>
+</body>
+</html>

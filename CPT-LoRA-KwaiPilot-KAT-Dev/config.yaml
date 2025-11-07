@@ -4,7 +4,7 @@
 
 repository:
   name: "hyperswitch"
-  path: "/workspace/RL_Code/CPT/hyperswitch"
+  path: "/workspace/Avinash/hyperswitch"
   language: "rust"
 
 model:
@@ -48,7 +48,7 @@ training:
   sample_packing: false
   
 dataset:
-  output_dir: "/workspace/RL_Code/CPT/dataset"
+  output_dir: "/workspace/dataset/"
   train_split: 0.90
   val_split: 0.10
   random_seed: 42
