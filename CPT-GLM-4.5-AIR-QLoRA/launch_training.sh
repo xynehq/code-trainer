@@ -55,7 +55,7 @@ echo ""
 echo "==================================================================="
 echo ""
 
-Check if model exists locally
+# Check if model exists locally
 MODEL_PATH="/workspace/Avinash/models/GLM-4.6"
 if [ ! -d "$MODEL_PATH" ]; then
     echo "❌ Model not found at $MODEL_PATH"
