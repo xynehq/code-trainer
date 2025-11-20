@@ -1,0 +1,840 @@
+#!/usr/bin/env python3
+"""
+Direct training script using Transformers + TRL + PEFT
+No Axolotl - pure HuggingFace ecosystem
+"""
+
+import os
+import sys
+import logging
+import math
+from pathlib import Path
+import yaml
+import torch
+import warnings
+import json
+import signal
+import atexit
+from datetime import datetime
+
+# Force all cache to /workspace/.cache
+os.environ['HF_HOME'] = '/workspace/.cache/huggingface'
+os.environ['HF_DATASETS_CACHE'] = '/workspace/.cache/huggingface/datasets'
+os.environ['WANDB_DIR'] = '/workspace/.cache/wandb'
+os.environ['WANDB_CACHE_DIR'] = '/workspace/.cache/wandb'
+os.environ['WANDB_DATA_DIR'] = '/workspace/.cache/wandb'
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+os.environ['TMPDIR'] = '/workspace/.cache/tmp'
+os.environ['TEMP'] = '/workspace/.cache/tmp'
+os.environ['TMP'] = '/workspace/.cache/tmp'
+
+# Critical: Tell Accelerate to use DeepSpeed's model loading
+os.environ['ACCELERATE_USE_DEEPSPEED'] = 'true'
+os.environ['ACCELERATE_DEEPSPEED_ZERO_STAGE'] = '3'
+
+# Memory optimization for PyTorch
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    TrainingArguments,
+    TrainerCallback,
+    set_seed,
+)
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, TaskType
+from trl import SFTTrainer
+from datasets import load_dataset
+
+# Set TF32 precision using new API (suppress deprecation warning)
+if torch.cuda.is_available():
+    torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cuda.matmul.allow_tf32 = True
+    # Use new API if available
+    if hasattr(torch.backends.cudnn, 'conv'):
+        torch.backends.cudnn.conv.fp32_precision = 'tf32'
+    if hasattr(torch.backends.cuda.matmul, 'fp32_precision'):
+        torch.backends.cuda.matmul.fp32_precision = 'tf32'
+
+# Suppress warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning, message=".*TF32.*")
+warnings.filterwarnings("ignore", message=".*torch_dtype.*deprecated.*")
+warnings.filterwarnings("ignore", message="`torch_dtype` is deprecated")
+warnings.filterwarnings("ignore", message=".*Gradient accumulation steps mismatch.*")
+warnings.filterwarnings("ignore", message=".*tokenizer has new PAD/BOS/EOS tokens.*")
+
+# Also suppress transformers tokenizer warnings at module level
+import logging
+logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
+logging.getLogger("accelerate.accelerator").setLevel(logging.ERROR)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+def load_config():
+    """Load configuration from YAML file"""
+    with open('config.yaml', 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+def get_training_config():
+    """Get training configuration from config.yaml"""
+    yaml_config = load_config()
+    
+    # Extract values from YAML config with fallback defaults
+    training_config = yaml_config.get('training', {})
+    model_config = yaml_config.get('model', {})
+    dataset_config = yaml_config.get('dataset', {})
+    wandb_config = yaml_config.get('wandb', {})
+    
+    return {
+        # Model
+        'base_model': model_config.get('name', 'Qwen/Qwen2.5-Coder-32B-Instruct'),
+        'output_base_dir': './outputs',
+        'run_name': f"hyperswitch-{model_config.get('name', 'qwen').split('/')[-1].lower()}-lora",
+        
+        # Wandb
+        'wandb_enabled': wandb_config.get('enabled', True),
+        'wandb_api_key': wandb_config.get('api_key', ''),
+        'wandb_project': wandb_config.get('project', 'hyperswitch-cpt'),
+        'wandb_entity': wandb_config.get('entity', ''),
+        'wandb_run_name': wandb_config.get('run_name', ''),
+        'wandb_tags': wandb_config.get('tags', ['rust', 'hyperswitch', 'lora']),
+        'wandb_notes': wandb_config.get('notes', 'CPT training for Hyperswitch Rust codebase'),
+        
+        # LoRA
+        'lora_r': training_config.get('lora', {}).get('r', 64),
+        'lora_alpha': training_config.get('lora', {}).get('alpha', 128),
+        'lora_dropout': training_config.get('lora', {}).get('dropout', 0.05),
+        'lora_target_modules': training_config.get('lora', {}).get('target_modules', 
+            ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']),
+        
+        # Training
+        'num_epochs': training_config.get('num_epochs', 5),
+        'micro_batch_size': training_config.get('micro_batch_size', 2),
+        'gradient_accumulation_steps': training_config.get('gradient_accumulation_steps', 8),
+        'eval_batch_size': training_config.get('eval_batch_size', 2),
+        'learning_rate': training_config.get('learning_rate', 0.00002),
+        'lr_scheduler': training_config.get('lr_scheduler', 'cosine'),
+        'warmup_ratio': training_config.get('warmup_ratio', 0.05),
+        'weight_decay': training_config.get('weight_decay', 0.0),
+        'max_grad_norm': training_config.get('max_grad_norm', 0.5),
+        
+        # Precision
+        'bf16': training_config.get('bf16', True),
+        'fp16': training_config.get('fp16', False),
+        'tf32': training_config.get('tf32', True),
+        
+        # Logging & Checkpointing
+        'logging_steps': training_config.get('logging_steps', 10),
+        'save_steps': training_config.get('save_steps', 50),
+        'eval_steps': training_config.get('eval_steps', 25),
+        
+        # Data
+        'sequence_len': dataset_config.get('max_tokens', 4096),
+        'sample_packing': training_config.get('sample_packing', False),
+        
+        # Dataset splits
+        'train_split': dataset_config.get('train_split', 0.90),
+        'val_split': dataset_config.get('val_split', 0.10),
+        'random_seed': dataset_config.get('random_seed', 42),
+        
+        # Memory
+        'gradient_checkpointing': training_config.get('gradient_checkpointing', True),
+        
+        # Misc
+        'seed': dataset_config.get('random_seed', 42),
+    }
+
+
+# Load config at module level
+TRAINING_CONFIG = get_training_config()
+
+
+def save_training_info(checkpoint_dir, config, train_dataset, eval_dataset, trainer, timestamp):
+    """Save comprehensive training information to checkpoint directory"""
+    import subprocess
+    
+    # Get GPU info
+    try:
+        gpu_info = subprocess.check_output(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader']).decode().strip().split('\n')
+        gpu_model = gpu_info[0] if gpu_info else "Unknown"
+        num_gpus = len(gpu_info)
+    except:
+        gpu_model = "Unknown"
+        num_gpus = torch.cuda.device_count()
+    
+    # Get package versions
+    import transformers
+    import peft
+    import trl
+    try:
+        import deepspeed
+        deepspeed_version = deepspeed.__version__
+    except:
+        deepspeed_version = "unknown"
+    
+    try:
+        import flash_attn
+        flash_attn_version = flash_attn.__version__
+    except:
+        flash_attn_version = "unknown"
+    
+    # Extract final metrics from trainer
+    final_step = trainer.state.global_step
+    final_epoch = trainer.state.epoch
+    log_history = trainer.state.log_history
+    
+    # Get final metrics
+    final_train_loss = None
+    final_eval_loss = None
+    initial_loss = None
+    final_accuracy = None
+    initial_accuracy = None
+    
+    for entry in log_history:
+        if 'loss' in entry and initial_loss is None:
+            initial_loss = entry['loss']
+            initial_accuracy = entry.get('mean_token_accuracy', None)
+        if 'loss' in entry:
+            final_train_loss = entry['loss']
+            final_accuracy = entry.get('mean_token_accuracy', None)
+        if 'eval_loss' in entry:
+            final_eval_loss = entry['eval_loss']
+    
+    training_info = {
+        "training_metadata": {
+            "timestamp": timestamp,
+            "training_date": datetime.now().strftime("%Y-%m-%d"),
+            "training_time": datetime.now().strftime("%H:%M:%S"),
+            "final_epoch": final_epoch,
+            "total_steps": final_step,
+            "status": "completed"
+        },
+        
+        "model_config": {
+            "base_model": config['base_model'],
+            "model_type": "causal_lm",
+            "architecture": "Qwen2ForCausalLM"
+        },
+        
+        "lora_config": {
+            "r": config['lora_r'],
+            "lora_alpha": config['lora_alpha'],
+            "lora_dropout": config['lora_dropout'],
+            "target_modules": config['lora_target_modules'],
+        },
+        
+        "training_config": {
+            "num_epochs": config['num_epochs'],
+            "per_device_train_batch_size": config['micro_batch_size'],
+            "per_device_eval_batch_size": config['eval_batch_size'],
+            "gradient_accumulation_steps": config['gradient_accumulation_steps'],
+            "effective_batch_size": config['micro_batch_size'] * config['gradient_accumulation_steps'] * num_gpus,
+            "learning_rate": config['learning_rate'],
+            "lr_scheduler_type": config['lr_scheduler'],
+            "warmup_ratio": config.get('warmup_ratio', 0.1),
+            "weight_decay": config['weight_decay'],
+            "max_grad_norm": config['max_grad_norm'],
+            "bf16": config['bf16'],
+            "gradient_checkpointing": config['gradient_checkpointing'],
+            "optim": "adamw_torch",
+            "logging_steps": config['logging_steps'],
+            "save_steps": config['save_steps'],
+            "eval_steps": config['eval_steps']
+        },
+        
+        "dataset_info": {
+            "train_samples": len(train_dataset),
+            "eval_samples": len(eval_dataset),
+            "max_seq_length": config['sequence_len'],
+            "sample_packing": config['sample_packing']
+        },
+        
+        "hardware_config": {
+            "num_gpus": num_gpus,
+            "gpu_model": gpu_model,
+            "distributed_strategy": "DeepSpeed ZeRO-2",
+            "flash_attention": flash_attn_version
+        },
+        
+        "performance_metrics": {
+            "final_train_loss": final_train_loss,
+            "final_eval_loss": final_eval_loss,
+            "final_train_perplexity": math.exp(final_train_loss) if final_train_loss is not None else None,
+            "final_eval_perplexity": math.exp(final_eval_loss) if final_eval_loss is not None else None,
+            "final_token_accuracy": final_accuracy,
+            "initial_loss": initial_loss,
+            "initial_perplexity": math.exp(initial_loss) if initial_loss is not None else None,
+            "initial_accuracy": initial_accuracy
+        },
+        
+        "framework_versions": {
+            "torch": torch.__version__,
+            "transformers": transformers.__version__,
+            "peft": peft.__version__,
+            "trl": trl.__version__,
+            "deepspeed": deepspeed_version,
+            "flash_attn": flash_attn_version,
+            "python": sys.version.split()[0]
+        },
+        
+        "special_features": {
+            "flash_attention_2": True,
+            "gradient_checkpointing": config['gradient_checkpointing'],
+            "bf16_training": config['bf16'],
+            "sample_packing": config['sample_packing'],
+            "deepspeed_zero2": True,
+            "distributed_training": num_gpus > 1
+        }
+    }
+    
+    # Save to checkpoint directory
+    info_path = os.path.join(checkpoint_dir, 'training_info.json')
+    with open(info_path, 'w') as f:
+        json.dump(training_info, f, indent=2)
+    
+    logger.info(f"  ✓ Saved training info: {info_path}")
+    return training_info
+
+
+class PerplexityCallback(TrainerCallback):
+    """Callback to log perplexity and metrics to wandb"""
+    
+    def __init__(self, wandb_enabled=True):
+        self.wandb_enabled = wandb_enabled
+        self.wandb_initialized = False
+        self.last_logged_step = -1  # Track last logged step to ensure monotonic steps
+        
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        """Calculate and log perplexity and other metrics"""
+        if logs is not None and state.is_world_process_zero and self.wandb_enabled:
+            import math
+            
+            # Initialize wandb if not already done
+            if not self.wandb_initialized:
+                try:
+                    import wandb
+                    self.wandb_initialized = True
+                except ImportError:
+                    logger.warning("wandb not installed, skipping wandb logging")
+                    self.wandb_enabled = False
+                    return
+            
+            if not self.wandb_enabled:
+                return
+                
+            # Prepare metrics dictionary
+            metrics = {}
+            
+            # Log train perplexity
+            if 'loss' in logs:
+                try:
+                    train_ppl = math.exp(logs['loss'])
+                    metrics['train/perplexity'] = train_ppl
+                    logs['train/perplexity'] = train_ppl  # Keep for console output
+                except (ValueError, OverflowError):
+                    # Handle edge cases where loss might be too large
+                    metrics['train/perplexity'] = float('inf')
+                    logs['train/perplexity'] = float('inf')
+            
+            # Log eval perplexity
+            if 'eval_loss' in logs:
+                try:
+                    eval_ppl = math.exp(logs['eval_loss'])
+                    metrics['eval/perplexity'] = eval_ppl
+                    logs['eval/perplexity'] = eval_ppl  # Keep for console output
+                except (ValueError, OverflowError):
+                    metrics['eval/perplexity'] = float('inf')
+                    logs['eval/perplexity'] = float('inf')
+            
+            # Log all other metrics from logs (learning rate, etc.)
+            for key, value in logs.items():
+                if key not in ['train/perplexity', 'eval/perplexity'] and isinstance(value, (int, float)):
+                    # Clean up metric names for wandb
+                    clean_key = key.replace('eval_', 'eval/').replace('train_', 'train/')
+                    metrics[clean_key] = value
+            
+            # Only log if we have a valid step that's greater than the last one
+            # This prevents out-of-order logging warnings
+            current_step = state.global_step
+            
+            # Skip logging if this step was already logged
+            if current_step <= self.last_logged_step:
+                # Use the next step number instead
+                current_step = self.last_logged_step + 1
+            
+            # Add step information
+            metrics['train/step'] = current_step
+            metrics['train/epoch'] = state.epoch
+            
+            # Log to wandb
+            try:
+                import wandb
+                wandb.log(metrics, step=current_step)
+                self.last_logged_step = current_step  # Update last logged step
+            except Exception as e:
+                logger.warning(f"Failed to log to wandb: {e}")
+    
+    def on_train_end(self, args, state, control, **kwargs):
+        """Finish wandb run at end of training"""
+        if self.wandb_enabled and state.is_world_process_zero:
+            try:
+                import wandb
+                wandb.finish()
+            except Exception as e:
+                logger.warning(f"Failed to finish wandb run: {e}")
+
+
+class TrainingInfoCallback(TrainerCallback):
+    """Callback to save training_info.json after each checkpoint"""
+    
+    def __init__(self, config, train_dataset, eval_dataset, timestamp):
+        self.config = config
+        self.train_dataset = train_dataset
+        self.eval_dataset = eval_dataset
+        self.timestamp = timestamp
+        self.trainer_ref = None
+    
+    def on_train_begin(self, args, state, control, model=None, **kwargs):
+        """Store trainer reference when training begins"""
+        # We'll get the trainer through kwargs later
+        pass
+    
+    def on_save(self, args, state, control, model=None, **kwargs):
+        """Called after saving a checkpoint"""
+        # Get the latest checkpoint directory
+        checkpoint_dir = Path(args.output_dir) / f"checkpoint-{state.global_step}"
+        
+        if checkpoint_dir.exists():
+            try:
+                logger.info(f"  💾 Saving training_info.json to {checkpoint_dir.name}...")
+                
+                # Create a minimal trainer-like object with state for save_training_info
+                class TrainerState:
+                    def __init__(self, state):
+                        self.state = state
+                
+                trainer_obj = TrainerState(state)
+                
+                save_training_info(
+                    str(checkpoint_dir),
+                    self.config,
+                    self.train_dataset,
+                    self.eval_dataset,
+                    trainer_obj,
+                    self.timestamp
+                )
+            except Exception as e:
+                logger.warning(f"  ⚠️  Failed to save training_info.json: {e}")
+
+
+
+def initialize_wandb(config, timestamp, output_dir, resume_from_checkpoint=None):
+    """Initialize Weights & Biases logging"""
+    if not config.get('wandb_enabled', True):
+        logger.info("  wandb disabled in config")
+        return False
+    
+    try:
+        import wandb
+        
+        # Set API key if provided
+        if config.get('wandb_api_key'):
+            os.environ['WANDB_API_KEY'] = config['wandb_api_key']
+        
+        # Check if API key is available
+        if not os.environ.get('WANDB_API_KEY') and not config.get('wandb_api_key'):
+            logger.warning("  ⚠️  No wandb API key found. Set WANDB_API_KEY environment variable or add to config.yaml")
+            logger.warning("  ⚠️  Continuing without wandb logging...")
+            return False
+        
+        # Check if resuming from checkpoint
+        resume_run_id = None
+        if resume_from_checkpoint:
+            # Try to find wandb run ID from checkpoint directory
+            checkpoint_dir = Path(resume_from_checkpoint).parent
+            wandb_dir = checkpoint_dir / "wandb"
+            if wandb_dir.exists():
+                # Find the run directory
+                run_dirs = list(wandb_dir.glob("run-*"))
+                if run_dirs:
+                    # Extract run ID from directory name
+                    resume_run_id = run_dirs[0].name.split('-')[1]
+                    logger.info(f"  Found existing wandb run ID: {resume_run_id}")
+        
+        # Generate run name
+        run_name = config.get('wandb_run_name', '')
+        if not run_name:
+            model_name = config['base_model'].split('/')[-1].lower()
+            learning_rate = config['learning_rate']
+            # Format learning rate for filename (e.g., 5e-5 -> 5e-5, 0.0001 -> 1e-4)
+            if learning_rate >= 1e-3:
+                lr_str = f"{learning_rate:.0e}".replace('+', '')
+            else:
+                lr_str = f"{learning_rate:.0e}".replace('+', '')
+            run_name = f"{model_name}-lr{lr_str}-{timestamp}"
+        
+        # Initialize wandb with resume if available
+        wandb.init(
+            project=config.get('wandb_project', 'hyperswitch-cpt'),
+            entity=config.get('wandb_entity', None),
+            name=run_name,
+            id=resume_run_id,  # Resume with same run ID if available
+            resume="allow" if resume_run_id else None,  # Allow resuming
+            tags=config.get('wandb_tags', ['rust', 'hyperswitch', 'lora']),
+            notes=config.get('wandb_notes', 'CPT training for Hyperswitch Rust codebase'),
+            config={
+                # Model config
+                'base_model': config['base_model'],
+                'model_size': config['base_model'].split('-')[-2] if '-' in config['base_model'] else 'unknown',
+                
+                # LoRA config
+                'lora_r': config['lora_r'],
+                'lora_alpha': config['lora_alpha'],
+                'lora_dropout': config['lora_dropout'],
+                'lora_target_modules': config['lora_target_modules'],
+                
+                # Training config
+                'num_epochs': config['num_epochs'],
+                'micro_batch_size': config['micro_batch_size'],
+                'gradient_accumulation_steps': config['gradient_accumulation_steps'],
+                'learning_rate': config['learning_rate'],
+                'lr_scheduler': config['lr_scheduler'],
+                'warmup_ratio': config['warmup_ratio'],
+                'weight_decay': config['weight_decay'],
+                'max_grad_norm': config['max_grad_norm'],
+                
+                # Precision
+                'bf16': config['bf16'],
+                'fp16': config['fp16'],
+                'tf32': config['tf32'],
+                
+                # Data
+                'sequence_len': config['sequence_len'],
+                'sample_packing': config['sample_packing'],
+                'train_split': config['train_split'],
+                'val_split': config['val_split'],
+                
+                # Memory optimization
+                'gradient_checkpointing': config['gradient_checkpointing'],
+                
+                # Hardware
+                'num_gpus': torch.cuda.device_count(),
+                'timestamp': timestamp,
+            },
+            dir=output_dir,  # Save wandb files in output directory
+        )
+        
+        logger.info(f"  ✓ wandb initialized: {config.get('wandb_project', 'hyperswitch-cpt')}/{run_name}")
+        return True
+        
+    except ImportError:
+        logger.warning("  ⚠️  wandb not installed. Install with: pip install wandb")
+        return False
+    except Exception as e:
+        logger.warning(f"  ⚠️  Failed to initialize wandb: {e}")
+        return False
+
+
+def main():
+    # Use global config (already loaded at module level)
+    global TRAINING_CONFIG
+    
+    # Check for resume checkpoint from environment variable or command line
+    resume_checkpoint_override = os.environ.get('RESUME_CHECKPOINT', None)
+    if len(sys.argv) > 1 and sys.argv[1].startswith('--resume'):
+        if '=' in sys.argv[1]:
+            resume_checkpoint_override = sys.argv[1].split('=')[1]
+        elif len(sys.argv) > 2:
+            resume_checkpoint_override = sys.argv[2]
+    
+    # Create timestamped output directory
+    # In distributed training, only rank 0 should create the timestamp
+    # Other ranks will use the same timestamp via environment variable
+    local_rank = int(os.environ.get('LOCAL_RANK', 0))
+    
+    if local_rank == 0:
+        # Rank 0 creates timestamp and stores it
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        os.environ['TRAINING_TIMESTAMP'] = timestamp
+    else:
+        # Other ranks wait for rank 0 to set the timestamp
+        import time
+        for _ in range(30):  # Wait up to 3 seconds
+            if 'TRAINING_TIMESTAMP' in os.environ:
+                timestamp = os.environ['TRAINING_TIMESTAMP']
+                break
+            time.sleep(0.1)
+        else:
+            # Fallback if environment variable not found
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    run_name = TRAINING_CONFIG['run_name']
+    output_dir = os.path.join(TRAINING_CONFIG['output_base_dir'], f"{run_name}_{timestamp}")
+
+    
+    logger.info("=" * 80)
+    logger.info("Hyperswitch CPT Training - Direct Implementation")
+    logger.info("Using: Transformers + TRL + PEFT + DeepSpeed + wandb")
+    logger.info("=" * 80)
+    
+    # Check for existing checkpoints to resume from
+    resume_from_checkpoint = resume_checkpoint_override
+    
+    if not resume_from_checkpoint and os.path.exists(output_dir):
+        checkpoints = sorted(Path(output_dir).glob("checkpoint-*"), 
+                           key=lambda x: int(x.name.split('-')[1]))
+        if checkpoints:
+            resume_from_checkpoint = str(checkpoints[-1])
+            logger.info(f"\n⚠️  Found existing checkpoint: {checkpoints[-1].name}")
+            logger.info(f"Will resume training from: {resume_from_checkpoint}")
+    
+    # If resume_checkpoint_override is set, use it directly
+    if resume_checkpoint_override:
+        resume_from_checkpoint = resume_checkpoint_override
+        logger.info(f"\n⚠️  Resume checkpoint specified: {resume_from_checkpoint}")
+        # Extract output dir from checkpoint path
+        checkpoint_path = Path(resume_from_checkpoint)
+        if checkpoint_path.exists():
+            output_dir = str(checkpoint_path.parent)
+            logger.info(f"Using existing output directory: {output_dir}")
+        else:
+            logger.warning(f"Checkpoint path does not exist: {resume_from_checkpoint}")
+            logger.warning("Starting fresh training...")
+    
+    # Initialize wandb
+    logger.info("\n[0/5] Initializing wandb...")
+    wandb_enabled = initialize_wandb(TRAINING_CONFIG, timestamp, output_dir, resume_from_checkpoint)
+    
+    # Model and training params
+    model_name = TRAINING_CONFIG['base_model']
+    
+    logger.info(f"\nModel: {model_name}")
+    logger.info(f"Output: {output_dir}")
+    logger.info(f"Training run: {timestamp}")
+    
+    # Load tokenizer
+    logger.info("\n[1/5] Loading tokenizer...")
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name,
+        trust_remote_code=True,
+    )
+    
+    # Qwen models need special token setup
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    
+    logger.info(f"  Vocab size: {len(tokenizer)}")
+    logger.info(f"  Pad token: {tokenizer.pad_token}")
+    
+    # Load datasets
+    logger.info("\n[2/5] Loading datasets...")
+    
+    # Get dataset path from config or use default
+    yaml_config = load_config()
+    dataset_dir = yaml_config.get('dataset', {}).get('output_dir', 'dataset')
+    dataset_file = f'{dataset_dir}/all_data.jsonl'
+    
+    # Load all data from single file
+    all_data = load_dataset('json', data_files=dataset_file, split='train')
+    logger.info(f"  Total samples: {len(all_data):,}")
+    
+    # Split using config values
+    test_size = TRAINING_CONFIG['val_split']  # e.g., 0.10 for 10% validation
+    seed = TRAINING_CONFIG['random_seed']
+    
+    split_dataset = all_data.train_test_split(test_size=test_size, seed=seed)
+    train_dataset = split_dataset['train']
+    eval_dataset = split_dataset['test']
+    
+    logger.info(f"  Training samples ({TRAINING_CONFIG['train_split']*100:.0f}%): {len(train_dataset):,}")
+    logger.info(f"  Validation samples ({TRAINING_CONFIG['val_split']*100:.0f}%): {len(eval_dataset):,}")
+    
+    # DON'T load model here - let DeepSpeed + Trainer handle it
+    logger.info("[3/5] Model will be loaded by DeepSpeed during Trainer init...")
+    logger.info("  This prevents GPU OOM by sharding the model across GPUs from the start")
+    
+    # Setup LoRA config
+    logger.info("\n[4/5] Setting up LoRA config...")
+    lora_config = LoraConfig(
+        task_type=TaskType.CAUSAL_LM,
+        r=TRAINING_CONFIG['lora_r'],
+        lora_alpha=TRAINING_CONFIG['lora_alpha'],
+        lora_dropout=TRAINING_CONFIG['lora_dropout'],
+        target_modules=TRAINING_CONFIG['lora_target_modules'],
+        bias="none",
+        inference_mode=False,
+    )
+    
+    logger.info(f"  LoRA rank: {lora_config.r}, alpha: {lora_config.lora_alpha}")
+    logger.info(f"  Target modules: {len(lora_config.target_modules)}")
+    logger.info(f"  ✓ LoRA config ready (will be applied by SFTTrainer)")
+    
+    # Training arguments
+    logger.info("\n[5/5] Setting up training...")
+    
+    # Determine report_to based on wandb availability
+    report_to = ["wandb"] if wandb_enabled else ["none"]
+    
+    training_args = TrainingArguments(
+        output_dir=output_dir,
+        
+        # Training schedule
+        num_train_epochs=TRAINING_CONFIG['num_epochs'],
+        max_steps=-1,  # Use epochs
+        
+        # Batch sizes
+        per_device_train_batch_size=TRAINING_CONFIG['micro_batch_size'],
+        per_device_eval_batch_size=TRAINING_CONFIG['eval_batch_size'],
+        gradient_accumulation_steps=TRAINING_CONFIG['gradient_accumulation_steps'],
+        
+        # Optimization
+        learning_rate=TRAINING_CONFIG['learning_rate'],
+        lr_scheduler_type=TRAINING_CONFIG['lr_scheduler'],
+        warmup_ratio=TRAINING_CONFIG['warmup_ratio'],
+        weight_decay=TRAINING_CONFIG['weight_decay'],
+        max_grad_norm=TRAINING_CONFIG['max_grad_norm'],
+        
+        # Precision
+        bf16=TRAINING_CONFIG['bf16'],
+        fp16=TRAINING_CONFIG['fp16'],
+        tf32=TRAINING_CONFIG['tf32'],
+        
+        # Logging
+        logging_steps=TRAINING_CONFIG['logging_steps'],
+        logging_dir=f"{output_dir}/logs",
+        report_to=report_to,  # Use wandb if available, otherwise none
+        
+        # Checkpointing
+        save_strategy="steps",
+        save_steps=TRAINING_CONFIG['save_steps'],
+        save_total_limit=3,
+        
+        # Evaluation
+        eval_strategy="steps",
+        eval_steps=TRAINING_CONFIG['eval_steps'],
+        
+        # Memory optimization - DeepSpeed handles activation checkpointing via its config
+        # gradient_checkpointing is DISABLED here to avoid conflict with DeepSpeed
+        
+        # DeepSpeed - use ZeRO-3 for 72B model on H200
+        deepspeed="deepspeed_configs/zero3_h200.json",
+        
+        # CRITICAL: Disable automatic device placement - let DeepSpeed handle it
+        # This prevents Trainer from calling model.to(device) before DeepSpeed sharding
+        fsdp="",  # Disable FSDP
+        
+        # Misc
+        dataloader_num_workers=8,  # 🚀 INCREASED from 4 to 8 for better throughput
+        dataloader_pin_memory=True,
+        dataloader_prefetch_factor=2,  # 🚀 ADDED: Prefetch 2 batches per worker
+        remove_unused_columns=False,
+        ddp_find_unused_parameters=False,
+        seed=TRAINING_CONFIG['seed'],
+    )
+    
+    logger.info(f"  Effective batch size: {training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps * training_args.world_size}")
+    logger.info(f"  Learning rate: {training_args.learning_rate}")
+    logger.info(f"  Epochs: {training_args.num_train_epochs}")
+    logger.info(f"  Save every: {training_args.save_steps} steps")
+    logger.info(f"  Eval every: {training_args.eval_steps} steps")
+    
+    # Create callbacks
+    perplexity_callback = PerplexityCallback(wandb_enabled=wandb_enabled)
+    training_info_callback = TrainingInfoCallback(
+        config=TRAINING_CONFIG,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        timestamp=timestamp
+    )
+    
+    # Initialize trainer with TRL's SFTTrainer
+    # Pass model NAME not model object - let DeepSpeed load and shard it
+    logger.info("\n[READY] Initializing trainer...")
+    logger.info("  DeepSpeed will load and shard the 72B model across 4 GPUs...")
+    trainer = SFTTrainer(
+        model=TRAINING_CONFIG['base_model'],  # Pass model name, not model object
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        processing_class=tokenizer,
+        formatting_func=lambda x: x["text"],
+        callbacks=[perplexity_callback, training_info_callback],
+        peft_config=lora_config,  # LoRA will be applied after model is loaded by DeepSpeed
+    )
+    
+    # Setup signal handler to save training info on interruption
+    def signal_handler(signum, frame):
+        logger.info("\n⚠️  Training interrupted! Saving training info before exit...")
+        try:
+            # Save to the most recent checkpoint or output dir
+            checkpoints = sorted(Path(output_dir).glob("checkpoint-*"), 
+                               key=lambda x: int(x.name.split('-')[1]))
+            if checkpoints:
+                latest_checkpoint = checkpoints[-1]
+                logger.info(f"Saving to latest checkpoint: {latest_checkpoint}")
+                save_training_info(str(latest_checkpoint), TRAINING_CONFIG, 
+                                 train_dataset, eval_dataset, trainer, timestamp)
+            else:
+                logger.info(f"Saving to output dir: {output_dir}")
+                save_training_info(output_dir, TRAINING_CONFIG, 
+                                 train_dataset, eval_dataset, trainer, timestamp)
+            logger.info("✓ Training info saved successfully")
+        except Exception as e:
+            logger.error(f"Failed to save training info: {e}")
+        sys.exit(0)
+    
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    logger.info("\n" + "=" * 80)
+    logger.info("Starting training...")
+    if resume_from_checkpoint:
+        logger.info(f"Resuming from: {Path(resume_from_checkpoint).name}")
+    logger.info("=" * 80 + "\n")
+    
+    # Train!
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+
+    
+    # Save final model in separate folder
+    logger.info("\n" + "=" * 80)
+    logger.info("Training complete! Saving final model...")
+    logger.info("=" * 80)
+    
+    final_model_dir = os.path.join(output_dir, "final_model")
+    logger.info(f"\nSaving final model to: {final_model_dir}")
+    trainer.save_model(final_model_dir)
+    tokenizer.save_pretrained(final_model_dir)
+    
+    # Save training info for final model
+    save_training_info(final_model_dir, TRAINING_CONFIG, train_dataset, eval_dataset, trainer, timestamp)
+    
+    logger.info("\n✓ Final model saved!")
+    logger.info(f"  Location: {final_model_dir}")
+    
+    # Show adapter size if it exists
+    adapter_path = os.path.join(final_model_dir, 'adapter_model.safetensors')
+    if os.path.exists(adapter_path):
+        adapter_size = os.path.getsize(adapter_path) / (1024**3)
+        logger.info(f"  LoRA adapters: {adapter_size:.2f} GB")
+    else:
+        logger.info(f"  LoRA adapters: saved")
+    
+    # Also save training info for all checkpoints
+    logger.info("\n✓ Saving training info for all checkpoints...")
+    for checkpoint in sorted(Path(output_dir).glob("checkpoint-*")):
+        save_training_info(str(checkpoint), TRAINING_CONFIG, train_dataset, eval_dataset, trainer, timestamp)
+        logger.info(f"  • {checkpoint.name}")
+    
+    logger.info(f"\n✓ Model saved to: {output_dir}")
+    logger.info("✓ Training complete!")
+
+
+if __name__ == "__main__":
+    main()

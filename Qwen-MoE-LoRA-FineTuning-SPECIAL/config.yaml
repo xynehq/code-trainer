@@ -1,0 +1,333 @@
+# ============================================================================
+# MoE Fine-tuning Configuration
+# Fine-tune MoE models with LoRA on Attention blocks only (FFN/Experts frozen)
+# ============================================================================
+
+# Model Configuration
+model:
+  # Base MoE model to fine-tune
+  name: "Qwen/Qwen3-Next-80B-A3B-Instruct"
+  
+  # Model loading settings
+  trust_remote_code: true
+  torch_dtype: "bfloat16"  # Use bfloat16 for H200
+  load_in_8bit: false
+  load_in_4bit: false
+  device_map: "auto"  # Auto-distribute across GPUs
+  
+  # Attention implementation
+  attn_implementation: "flash_attention_2"  # Requires flash-attn installed
+  
+  # Max sequence length
+  max_seq_length: 1024  # Reduced from 2048 for memory efficiency
+
+# LoRA Configuration - ATTENTION BLOCKS ONLY
+lora:
+  # LoRA rank and alpha
+  r: 16  # Rank of LoRA matrices (8, 16, 32, 64)
+  lora_alpha: 32  # Scaling factor (typically 2*r)
+  lora_dropout: 0.05
+  
+  # Target modules - ATTENTION ONLY (freeze FFN/MLP/Experts)
+  # For Mixtral MoE: only apply to attention layers
+  target_modules:
+    - "q_proj"    # Query projection
+    - "k_proj"    # Key projection  
+    - "v_proj"    # Value projection
+    - "o_proj"    # Output projection
+  
+  # Explicitly EXCLUDE FFN/Expert layers
+  # These patterns will NOT receive LoRA adapters
+  exclude_modules:
+    - "block_sparse_moe"  # Entire MoE block
+    - "w1"                # Expert FFN up projection
+    - "w2"                # Expert FFN down projection
+    - "w3"                # Expert FFN gate projection
+    - "gate"              # Router/gating network
+  
+  # LoRA specific settings
+  bias: "none"  # Don't train bias terms
+  task_type: "CAUSAL_LM"
+  
+  # Use rslora for better stability
+  use_rslora: true
+  
+  # Modules to save (attention only)
+  modules_to_save: []  # Empty = only LoRA adapters
+
+# Dataset Configuration
+dataset:
+  # Data paths
+  data_file: "all_data.jsonl"  # Output from prepare_dataset.py
+  output_dir: "data"
+  
+  # Preprocessing
+  max_tokens: 4096
+  overlap_tokens: 256
+  
+  # Train/validation split
+  train_split: 0.95
+  random_seed: 42
+  
+  # Filtering
+  include_tests: false
+  min_tokens: 50
+  
+  # Text field in JSONL
+  text_field: "text"
+
+# Repository Configuration
+repository:
+  path: "hyperswitch"  # Path to cloned hyperswitch repo
+  exclude_patterns:
+    - "target/"
+    - ".git/"
+    - "generated/"
+    - ".gen.rs"
+    - "build/"
+
+# Training Configuration
+training:
+  # Output directory
+  output_dir: "outputs/moe-hyperswitch-attn-lora"
+  run_name: "mixtral-hyperswitch-attention-lora"
+  
+  # Training hyperparameters
+  num_train_epochs: 3
+  max_steps: -1  # Override epochs if set (e.g., 10000)
+  per_device_train_batch_size: 1  # Small batch per GPU for large model
+  per_device_eval_batch_size: 1
+  gradient_accumulation_steps: 32  # Increased from 16 to save memory (Effective batch = 1 * 32 * 4 GPUs = 128)
+  
+  # Learning rate scheduling
+  learning_rate: 2.0e-4  # Higher LR for LoRA (typical: 1e-4 to 3e-4)
+  min_learning_rate: 1.0e-6  # Minimum LR for cosine scheduler
+  lr_scheduler_type: "cosine"  # Options: linear, cosine, cosine_with_restarts, polynomial, constant, constant_with_warmup
+  warmup_ratio: 0.03  # 3% warmup (alternative: warmup_steps)
+  warmup_steps: 0  # If set, overrides warmup_ratio
+  
+  # Regularization
+  weight_decay: 0.01  # L2 regularization
+  label_smoothing_factor: 0.0  # Label smoothing (0.0 = disabled)
+  dropout: 0.05  # Dropout rate (if applicable)
+  attention_dropout: 0.0  # Attention dropout
+  
+  # Optimizer settings
+  optim: "adamw_torch_fused"  # Options: adamw_torch, adamw_torch_fused, adamw_hf, adafactor, sgd
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_epsilon: 1.0e-8
+  max_grad_norm: 1.0  # Gradient clipping
+  
+  # Mixed precision
+  bf16: true  # Use BF16 on H200
+  fp16: false
+  
+  # Memory optimization
+  gradient_checkpointing: true
+  gradient_checkpointing_kwargs:
+    use_reentrant: false
+  optim: "adafactor"  # Memory-efficient optimizer (no momentum state)
+  
+  # Evaluation
+  evaluation_strategy: "steps"
+  eval_steps: 50
+  save_strategy: "steps"
+  save_steps: 50  # Save every 50 steps
+  save_total_limit: 3  # Keep only latest 3 checkpoints
+  load_best_model_at_end: true
+  metric_for_best_model: "eval_loss"
+  greater_is_better: false
+  
+  # Logging
+  logging_steps: 10
+  logging_first_step: true
+  report_to: ["wandb"]  # Log to wandb only
+  
+  # Distributed training (for 4x H200)
+  ddp_find_unused_parameters: false
+  ddp_backend: "nccl"
+  ddp_timeout: 1800  # 30 minutes timeout
+  local_rank: -1  # Set by launcher
+  
+  # Performance optimization
+  dataloader_num_workers: 4
+  dataloader_pin_memory: true
+  dataloader_prefetch_factor: 2
+  group_by_length: false  # Group sequences by length
+  length_column_name: "length"
+  
+  # Training efficiency
+  auto_find_batch_size: false  # Automatically find largest batch size
+  full_determinism: false  # Strict reproducibility (slower)
+  
+  # Reproducibility
+  seed: 42
+  data_seed: 42
+  
+  # Save settings
+  save_safetensors: true
+  save_only_model: false  # Also save optimizer/scheduler state
+  
+  # Resume from checkpoint
+  resume_from_checkpoint: null  # Set to path to resume
+  ignore_data_skip: false  # Skip data when resuming
+
+# MoE Specific Settings
+moe:
+  # Load balancing auxiliary loss
+  # Keep this active during fine-tuning to prevent expert collapse
+  use_auxiliary_loss: true
+  auxiliary_loss_weight: 0.001  # Reduced from pre-training (typically 0.01)
+  
+  # Router settings
+  freeze_router: false  # Allow router to adapt to new domain
+  router_jitter_noise: 0.0  # Can add noise for regularization
+  
+  # Expert utilization monitoring
+  monitor_expert_usage: true
+  log_expert_metrics: true
+  
+  # Top-k routing
+  num_experts_per_token: 2  # Standard Mixtral setting
+
+# Hardware Configuration
+hardware:
+  num_gpus: 4  # 4x H200
+  gpu_memory_per_device: 141  # GB (H200 has ~141GB usable)
+  
+  # Memory estimation
+  model_size_gb: 90  # Mixtral 8x7B is ~90GB in BF16
+  estimated_memory_per_gpu: 120  # Including gradients, optimizer, activations
+
+# Tokenizer Configuration
+tokenizer:
+  # Will use same tokenizer as model
+  padding_side: "right"
+  truncation_side: "right"
+  add_eos_token: true
+  add_bos_token: true
+
+# Validation Configuration
+validation:
+  # Validation metrics
+  compute_metrics: true
+  compute_perplexity: true  # Calculate perplexity during evaluation
+  metrics:
+    - "perplexity"
+    - "loss"
+  
+  # Validation data
+  validation_split: 0.05
+  max_eval_samples: null  # Use all validation data
+  
+  # Metric logging
+  log_perplexity_every_n_steps: 10
+
+# Checkpointing
+checkpoint:
+  # Checkpoint management
+  save_only_model: false  # Save optimizer state too
+  save_on_each_node: false
+  
+  # HuggingFace Hub (optional)
+  push_to_hub: false
+  hub_model_id: null
+  hub_token: null
+
+# Experiment Tracking with Weights & Biases
+wandb:
+  enabled: true
+  project: "moe-hyperswitch-finetuning"
+  entity: null  # Your wandb username/team (optional)
+  name: "qwen3-next-80b-hyperswitch-attention-lora"
+  api_key: "38d2094b13eb4961224d1b6d3a772931c67e2141"  
+  tags:
+    - "moe"
+    - "qwen3"
+    - "qwen3-next-80b"
+    - "lora"
+    - "attention-only"
+    - "hyperswitch"
+    - "rust-code"
+  notes: "Fine-tuning Qwen3-Next-80B-A3B on Hyperswitch Rust codebase with attention-only LoRA"
+  
+  # Logging settings
+  log_model: "checkpoint"  # Log model checkpoints: false, "checkpoint", "end"
+  watch: "gradients"  # What to watch: false, "gradients", "all"
+  watch_freq: 100  # Log frequency
+  save_code: true  # Save training code to wandb
+
+# Inference Configuration
+inference:
+  # Generation parameters
+  max_new_tokens: 512
+  max_length: 4096
+  min_length: 0
+  
+  # Sampling parameters
+  do_sample: true
+  temperature: 0.7  # Randomness (0.0-2.0, lower = more deterministic)
+  top_k: 50  # Top-k sampling
+  top_p: 0.95  # Nucleus sampling (top-p)
+  repetition_penalty: 1.0  # Penalize repetition (1.0 = no penalty)
+  length_penalty: 1.0  # Length penalty for beam search
+  
+  # Beam search
+  num_beams: 1  # Number of beams (1 = greedy/sampling)
+  num_beam_groups: 1
+  diversity_penalty: 0.0
+  
+  # Stopping criteria
+  early_stopping: false
+  num_return_sequences: 1
+  
+  # Special tokens
+  pad_token_id: null  # Auto-detect from tokenizer
+  bos_token_id: null
+  eos_token_id: null
+  
+  # Performance
+  use_cache: true  # Use KV cache for faster generation
+
+# Advanced Settings
+advanced:
+  # Gradient clipping
+  max_grad_norm: 1.0
+  clip_grad_norm: true
+  
+  # Early stopping (optional)
+  early_stopping_patience: null  # Number of evals with no improvement
+  early_stopping_threshold: 0.0001  # Minimum improvement threshold
+  
+  # Model compilation (PyTorch 2.0+)
+  torch_compile: false  # Set to true if using PyTorch 2.0+
+  torch_compile_backend: "inductor"  # Options: inductor, aot_eager, cudagraphs
+  torch_compile_mode: "default"  # Options: default, reduce-overhead, max-autotune
+  
+  # Memory optimization
+  use_cpu_offload: false  # Offload to CPU when OOM
+  offload_folder: "offload"
+  
+  # Memory profiling
+  profile_memory: false
+  skip_memory_metrics: false
+  
+  # Gradient accumulation optimization
+  gradient_accumulation_steps_auto: false
+  
+  # Debugging
+  debug_mode: false
+  detect_anomaly: false
+  log_level: "info"  # Options: debug, info, warning, error, critical
+  disable_tqdm: false
+
+# Post-training
+post_training:
+  # Merge LoRA weights back into base model (optional)
+  merge_and_save: true
+  merged_output_dir: "outputs/moe-hyperswitch-merged"
+  
+  # Quantization after training (optional)
+  quantize_after_training: false
+  quantization_bits: 4

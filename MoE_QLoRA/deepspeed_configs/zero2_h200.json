@@ -1,0 +1,35 @@
+{
+    "bf16": {
+        "enabled": true
+    },
+    "zero_optimization": {
+        "stage": 2,
+        "offload_optimizer": {
+            "device": "none"
+        },
+        "offload_param": {
+            "device": "none"
+        },
+        "contiguous_gradients": true,
+        "overlap_comm": true,
+        "reduce_scatter": true,
+        "reduce_bucket_size": 1e9,
+        "allgather_bucket_size": 1e9,
+        "round_robin_gradients": true
+    },
+    "gradient_accumulation_steps": "auto",
+    "gradient_clipping": "auto",
+    "steps_per_print": 10,
+    "train_batch_size": "auto",
+    "train_micro_batch_size_per_gpu": "auto",
+    "wall_clock_breakdown": false,
+    "comms_logger": {
+        "enabled": false
+    },
+    "tensorboard": {
+        "enabled": false
+    },
+    "prescale_gradients": false,
+    "sparse_gradients": false,
+    "zero_allow_untested_optimizer": true
+}

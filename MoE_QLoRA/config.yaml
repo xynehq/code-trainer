@@ -1,0 +1,142 @@
+# CPT Configuration for Hyperswitch Rust Repository
+# =================================================
+
+# Repository Configuration
+repository:
+  name: "hyperswitch"
+  path: "/workspace/CPT_Kwai/hyperswitch"
+  language: "rust"
+
+
+# Model Configuration
+model:
+  name: "Qwen/Qwen3-Next-80B-A3B-Instruct"
+  size: "80B"
+  type: "instruct"  # chat/instruct model with conversational capabilities
+
+# Training Configuration
+training:
+  # QLoRA settings (4-bit quantization)
+  lora:
+    r: 64                    # Good for 80B model
+    alpha: 128               # LoRA alpha (typically 2*r)
+    dropout: 0.05            # LoRA dropout
+    target_modules:          # For MoE models, ONLY target attention layers!
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      # DO NOT target MLP layers (gate_proj, up_proj, down_proj) in MoE models!
+      # This model has 128 experts which would create 6144+ adapters per layer!
+  
+  # Quantization settings (QLoRA - 4-bit)
+  quantization:
+    load_in_4bit: true                    # Enable 4-bit quantization
+    bnb_4bit_quant_type: "nf4"           # Use NF4 (NormalFloat4) quantization
+    bnb_4bit_compute_dtype: "bfloat16"   # Compute in BF16 for stability
+    bnb_4bit_use_double_quant: true      # Double quantization for extra memory savings
+  
+  # Training hyperparameters
+  num_epochs: 3         
+  micro_batch_size: 1        # Reduced to 1 for 30B MoE model
+  gradient_accumulation_steps: 16  # Increased to maintain effective batch size
+  eval_batch_size: 1       # Reduced to 1       
+  learning_rate: 0.00005     # 5e-5
+  lr_scheduler: "cosine"
+  warmup_ratio: 0.03
+  weight_decay: 0.1
+  max_grad_norm: 0.5
+  
+  # Precision
+  bf16: true
+  fp16: false
+  tf32: true
+  
+  # Logging & Checkpointing
+  logging_steps: 10
+  save_steps: 50
+  eval_steps: 25
+  
+  # Memory optimization
+  gradient_checkpointing: true
+  gradient_checkpointing_use_reentrant: false  # Use non-reentrant for stability with QLoRA
+  sample_packing: false
+
+# Weights & Biases Configuration
+wandb:
+  enabled: true                # Set to false to disable wandb logging
+  api_key: "38d2094b13eb4961224d1b6d3a772931c67e2141" # Paste your wandb API key here
+  project: "Qwen3-Next-80B-QLoRA-cpt-hs"   # Project name in wandb
+  entity: ""                   # Your wandb username/organization (optional)
+  run_name: ""                 # Custom run name (optional, auto-generated if empty)
+  tags:                        # Tags for organizing runs
+    - "rust"
+    - "hyperswitch"
+    - "qlora"
+    - "80B"
+    - "code-training"
+  notes: "QLoRA (4-bit) CPT training for Hyperswitch Rust codebase with Qwen3-Next-80B"  # Description of the run
+  
+# Dataset Configuration
+dataset:
+  output_dir: "/workspace/CPT_Kwai/dataset"
+  train_split: 0.90
+  val_split: 0.10
+  random_seed: 42
+  
+  # Context window settings
+  max_tokens: 8192          # Max context length for model
+  overlap_tokens: 512       # Overlap for sliding window on long files
+  
+  # Dataset modes - for Q&A and code understanding
+  modes:
+    - "full_file"           # Complete files with context
+    - "function_focus"      # Individual functions with context
+    - "dependency_map"      # File dependencies and imports
+    - "api_catalog"         # Function signatures and docs
+  
+  # Filtering rules
+  include:
+    - "*.rs"                # Include all Rust files
+    - "!**/target/**"       # Exclude build artifacts
+    - "!**/*.gen.rs"        # Exclude generated files
+    - "!**/generated/**"    # Exclude generated directory
+  
+  # Test files strategy
+  include_tests: true       # Tests show usage patterns - include them
+  
+  # Data augmentation for Q&A tasks
+  augmentation:
+    add_file_path: true         # Prefix with file path
+    add_module_context: true    # Add import context
+    extract_functions: true     # Extract individual functions
+    extract_structs: true       # Extract struct definitions
+    extract_traits: true        # Extract trait definitions
+    add_dependencies: true      # Add import/use statements
+    add_cross_references: true  # Add related file references
+    
+# Preprocessing Configuration
+preprocessing:
+  # What to keep
+  keep_comments: true       # Keep documentation and important comments
+  keep_docstrings: true     # Keep /// and //! comments
+  keep_attributes: true     # Keep #[derive(...)] etc.
+  
+  # What to remove/clean
+  remove_debug_prints: false  # Keep for now, they show debugging patterns
+  normalize_whitespace: true  # Normalize excessive blank lines
+  max_blank_lines: 2         # Max consecutive blank lines
+  
+  # Token counting
+  tokenizer: "Qwen/Qwen3-Next-80B-A3B-Instruct"
+
+# Output format
+output:
+  format: "jsonl"           # JSONL format for training
+  fields:
+    - "text"                # Main text field
+    - "file_path"           # Source file path
+    - "module"              # Crate/module name
+    - "tokens"              # Token count
+    - "type"                # Sample type (full_file, function, etc.)
+    - "metadata"            # Additional metadata (functions, structs, deps)
