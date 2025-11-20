@@ -58,7 +58,7 @@ training:
 # Weights & Biases Configuration
 wandb:
   enabled: true                # Set to false to disable wandb logging
-  api_key: "38d2094b13eb4961224d1b6d3a772931c67e2141" # Paste your wandb API key here
+  api_key: "<WANDB API KEY>" # Paste your wandb API key here
   project: "hyperswitch-cpt"   # Project name in wandb
   entity: ""                   # Your wandb username/organization (optional)
   run_name: ""                 # Custom run name (optional, auto-generated if empty)

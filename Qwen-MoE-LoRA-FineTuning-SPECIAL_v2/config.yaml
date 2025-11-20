@@ -242,7 +242,7 @@ wandb:
   project: "moe-hyperswitch-finetuning"
   entity: null  # Your wandb username/team (optional)
   name: "qwen3-next-80b-hyperswitch-attention-lora"
-  api_key: "38d2094b13eb4961224d1b6d3a772931c67e2141"  
+  api_key: "<WANDB API KEY>"  
   tags:
     - "moe"
     - "qwen3"
