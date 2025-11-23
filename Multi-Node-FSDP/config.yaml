@@ -1,0 +1,110 @@
+# FSDP Training Configuration
+
+# Model Configuration
+model:
+  # Can be HuggingFace repo name (e.g., "Qwen/Qwen2.5-7B") or local path (e.g., "/workspace/models/my-model")
+  name_or_path: "/workspace/Avinash/models/GLM-4.5-Air"
+  
+  # Trust remote code for models that require it (e.g., GLM, Qwen)
+  trust_remote_code: true
+  
+  # Optional: specify custom HuggingFace cache directory
+  # If not set, uses default ~/.cache/huggingface
+  cache_dir: null
+
+# Data Configuration
+data:
+  # Path to JSONL dataset file
+  dataset_path: "/workspace/Avinash/dataset/all_data.jsonl"
+  
+  # Name of text column in JSONL
+  text_column: "text"
+  
+  # Maximum sequence length (tokens will be truncated/padded to this length)
+  max_length: 8192
+  
+  # Validation split ratio (0.0 to 1.0)
+  val_split: 0.1
+
+# Training Configuration
+training:
+  # Output directory for checkpoints and logs
+  output_dir: "./glm_fsdp_output"
+  
+  # Random seed for reproducibility
+  seed: 42
+  
+  # Number of training epochs
+  num_train_epochs: 1                    # Full training run
+  
+  # Batch size per GPU
+  per_device_train_batch_size: 1
+  per_device_eval_batch_size: 2
+  
+  # Gradient accumulation steps (effective batch = per_device_batch * accumulation * num_gpus)
+  gradient_accumulation_steps: 2
+  
+  # Learning rate
+  learning_rate: 4.0e-5
+  
+  # Weight decay for regularization
+  weight_decay: 0.01
+  
+  # Warmup ratio (fraction of total steps for warmup)
+  warmup_ratio: 0.1
+  
+  # Logging frequency (steps)
+  logging_steps: 1
+  
+  # Evaluation strategy: "steps" or "epoch"
+  eval_strategy: "steps"
+  
+  # Evaluation dataset size ("full" uses all eval samples, "subset" uses reduced set for faster eval)
+  eval_dataset_type: "subset"  # Options: "full" or "subset"
+  eval_subset_size: 200        # Balanced: representative but not too slow
+  
+  # Evaluation frequency (if eval_strategy is "steps")
+  eval_steps: 100               # Less frequent for production
+  
+  # Checkpointing frequency (steps)
+  save_steps: 100              # Save every 100 steps
+  
+  # Checkpoint mode: "lite" (adapters only, fast) or "full" (optimizer+adapters, slow)
+  checkpoint_mode: "lite"  # Use "lite" for fast experimental iterations
+  
+  # Set to true to run evaluation before training starts
+  run_baseline_eval: false     # Skip baseline for faster start
+  
+  # Maximum number of checkpoints to keep (keeps best N based on eval loss)
+  save_total_limit: 5          # Keep more checkpoints for production
+  
+  # Use bfloat16 mixed precision (recommended for H100/A100)
+  bf16: true
+  
+  # Enable gradient checkpointing to reduce memory usage
+  gradient_checkpointing: true
+
+# LoRA Configuration
+lora:
+  # LoRA rank (higher = more parameters)
+  r: 64
+  
+  # LoRA alpha (scaling factor, typically 2*r)
+  lora_alpha: 128
+  
+  # LoRA dropout
+  lora_dropout: 0.1
+  
+  # Bias training: "none", "all", or "lora_only"
+  bias: "none"
+  
+  # Target modules for LoRA (attention projections are standard)
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    # For MLP as well (more parameters but better performance):
+    # - "gate_proj"
+    # - "up_proj"
+    # - "down_proj"
