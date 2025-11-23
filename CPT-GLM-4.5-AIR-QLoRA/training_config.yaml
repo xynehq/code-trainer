@@ -5,21 +5,21 @@
 paths:
   model_path: "/workspace/Avinash/models/GLM-4.5-Air"
   data_path: "/workspace/Avinash/dataset/all_data.jsonl"
-  output_dir: "glm45-air-cpt-qlora-2"  # Output directory for checkpoints and logs
+  output_dir: "glm45-air-cpt-qlora"  # Output directory for checkpoints and logs (aligned with launch script)
   best_adapter_dir: "best-glm45-adapter"
 
 # Training Configuration
 training:
   num_epochs: 3
   seed: 42
-  max_seq_length: 4096
+  max_seq_length: 5120  # Maximum sequence length for tokenization
   train_val_split: 0.9  # 90% train, 10% validation
 
 # Batch and Optimization
 optimization:
   micro_batch_per_gpu: 1
   grad_accum_steps: 16
-  learning_rate: 5.0e-6
+  learning_rate: 5.0e-5
   weight_decay: 0.01
   max_grad_norm: 1.0
   warmup_ratio: 0.08  # 8% of total updates (optimal for MoE + 4-bit)
@@ -28,10 +28,10 @@ optimization:
 
 # LoRA Configuration
 lora:
-  r: 64
-  lora_alpha: 128
+  r: 32
+  lora_alpha: 64
   target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
-  lora_dropout: 0.05
+  lora_dropout: 0.1
   bias: "none"
 
 # Quantization (QLoRA)
@@ -43,8 +43,8 @@ quantization:
 
 # Logging and Checkpointing
 logging:
-  log_interval: 10          # Log training metrics every N steps
-  eval_interval: 1000        # Run validation every N steps
+  log_interval: 1         # Log training metrics every N steps
+  eval_interval: 500        # Run validation every N steps
   checkpoint_interval: 1000 # Save checkpoint every N steps
   max_checkpoints: 8        # Keep only top K checkpoints
 

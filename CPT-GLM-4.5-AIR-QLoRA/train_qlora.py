@@ -158,12 +158,22 @@ def evaluate(model, eval_dataloader, accelerator):
     
     with torch.no_grad():
         for batch in eval_dataloader:
-            outputs = model(**batch)
-            loss = outputs.loss
-            total_loss += loss.item() * batch["input_ids"].size(0)
-            total_samples += batch["input_ids"].size(0)
+            with accelerator.accumulate(model):
+                outputs = model(**batch)
+                loss = outputs.loss
+                # Gather loss across all processes for correct averaging
+                loss_gathered = accelerator.gather(loss.unsqueeze(0))
+                total_loss += loss_gathered.mean().item() * batch["input_ids"].size(0)
+                total_samples += batch["input_ids"].size(0)
     
-    avg_loss = total_loss / total_samples if total_samples > 0 else float('inf')
+    # Synchronize total_loss and total_samples across all ranks
+    total_loss_tensor = torch.tensor(total_loss, device=model.device)
+    total_samples_tensor = torch.tensor(total_samples, device=model.device)
+    
+    total_loss_tensor = accelerator.reduce(total_loss_tensor)
+    total_samples_tensor = accelerator.reduce(total_samples_tensor)
+    
+    avg_loss = total_loss_tensor.item() / total_samples_tensor.item() if total_samples_tensor.item() > 0 else float('inf')
     perplexity = math.exp(avg_loss) if avg_loss < 100 else float('inf')
     
     model.train()
@@ -331,6 +341,10 @@ def main():
     perf_cfg = config['performance']
     
     set_seed(training_cfg['seed'])
+    import random
+    import numpy as np
+    random.seed(training_cfg['seed'])
+    np.random.seed(training_cfg['seed'])
 
     accelerator = Accelerator(gradient_accumulation_steps=opt_cfg['grad_accum_steps'])
 
@@ -415,10 +429,12 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
 
     def tokenize_function(examples):
+        # Use max sequence length from YAML config (fallback to 4096 if missing)
+        max_len = int(training_cfg.get("max_seq_length", 4096))
         result = tokenizer(
             examples["text"],
             truncation=True,
-            max_length=4096,
+            max_length=max_len,
             padding="max_length",
             return_attention_mask=True,
         )
@@ -633,10 +649,13 @@ def main():
     
     # Initial evaluation (baseline before training) - skip if resuming
     if start_step == 0:
+        accelerator.wait_for_everyone()  # Ensure all ranks are synchronized before eval
         accelerator.print("\n" + "="*60)
         accelerator.print("📊 Initial Evaluation (Baseline)")
         accelerator.print("="*60)
         initial_metrics = evaluate(model, eval_dataloader, accelerator)
+        accelerator.wait_for_everyone()  # Synchronize after eval completes
+        
         initial_loss = initial_metrics["eval_loss"]
         initial_ppl = initial_metrics["eval_perplexity"]
         accelerator.print(f"Initial Validation Loss: {initial_loss:.4f}")
@@ -737,12 +756,15 @@ def main():
                 accelerator.print(msg)
                 
                 # Log to file - match the exact format from previous logs
+                # Convert grad_norm to float if it's a Tensor
+                grad_norm_value = float(grad_norm) if grad_norm is not None else None
+                
                 log_entry = {
                     "epoch": epoch,
                     "step": global_step,
                     "loss": loss.item(),
                     "aux_loss": aux_loss.item() if aux_loss is not None else None,
-                    "grad_norm": grad_norm if grad_norm is not None else None,
+                    "grad_norm": grad_norm_value,
                     "learning_rate": current_lr,
                     "steps_per_sec": steps_per_sec,
                     "eta_seconds": eta_seconds,
@@ -760,9 +782,12 @@ def main():
                           global_step != start_step)
             
             if should_eval:
+                accelerator.wait_for_everyone()  # Sync before eval
                 accelerator.print(f"\n{'='*60}")
                 accelerator.print(f"Running validation at step {global_step}...")
                 eval_metrics = evaluate(model, eval_dataloader, accelerator)
+                accelerator.wait_for_everyone()  # Sync after eval
+                
                 eval_loss = eval_metrics["eval_loss"]
                 eval_ppl = eval_metrics["eval_perplexity"]
                 

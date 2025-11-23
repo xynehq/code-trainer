@@ -1,0 +1,14 @@
+{
+  "prompts": [
+    "Explain what a payment gateway is in simple terms.",
+    "Write a Python function to calculate the factorial of a number.",
+    "What are the key differences between REST and GraphQL APIs?",
+    "How does blockchain technology ensure transaction security?",
+    "Describe the SOLID principles in software engineering.",
+    "What is the difference between synchronous and asynchronous programming?",
+    "Explain the concept of database normalization.",
+    "How does OAuth 2.0 authentication work?",
+    "What are the benefits of using Docker containers?",
+    "Describe the main features of the Rust programming language."
+  ]
+}

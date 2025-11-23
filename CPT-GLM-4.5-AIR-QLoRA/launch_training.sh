@@ -9,10 +9,15 @@ mkdir -p /workspace/tmp
 mkdir -p /workspace/.cache/huggingface
 
 # Environment setup
-export CUDA_VISIBLE_DEVICES=0,1,2,3
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
 export NCCL_DEBUG=INFO
 export NCCL_IB_DISABLE=0
 export NCCL_NET_GDR_LEVEL=3
+# Increase NCCL timeout from 30min to 2 hours for initial eval with 8 GPUs
+export NCCL_BLOCKING_WAIT=1
+export NCCL_ASYNC_ERROR_HANDLING=1
+export TORCH_NCCL_BLOCKING_WAIT=1
+export NCCL_TIMEOUT=7200  # 2 hours in seconds for large model evaluation
 
 # H200 optimizations
 export TORCH_CUDA_ARCH_LIST="9.0"
@@ -36,10 +41,10 @@ echo "==================================================================="
 echo ""
 echo "📊 Training Configuration:"
 echo "  • Model: GLM-4.5-Air (100B+ parameters, MoE architecture)"
-echo "  • GPUs: 4x H200 (80GB each)"
+echo "  • GPUs: Auto-detected from CUDA_VISIBLE_DEVICES"
 echo "  • Strategy: QLoRA + 4-bit quantization (NF4)"
-echo "  • Effective batch: 64 (1 micro × 16 grad accum × 4 GPUs)"
-echo "  • Learning rate: 5e-6 (optimized for CPT)"
+echo "  • Effective batch: varies (1 micro × 16 grad accum × num_processes)"
+echo "  • Learning rate: 5e-4 (optimized for CPT)"
 echo "  • Warmup: 8% (59 updates, maximum stability)"
 echo "  • Epochs: 3 (standard for domain adaptation)"
 echo ""
@@ -56,7 +61,7 @@ echo "==================================================================="
 echo ""
 
 # Check if model exists locally
-MODEL_PATH="/workspace/Avinash/models/GLM-4.6"
+MODEL_PATH="/workspace/Avinash/models/GLM-4.5-Air"
 if [ ! -d "$MODEL_PATH" ]; then
     echo "❌ Model not found at $MODEL_PATH"
     echo "Please run: python download_model.py"
@@ -89,6 +94,9 @@ echo ""
 CHECKPOINT_DIR="glm45-air-cpt-qlora"
 RESUME_FLAG=""
 
+# Count available GPUs from CUDA_VISIBLE_DEVICES
+NUM_GPUS=$(echo $CUDA_VISIBLE_DEVICES | tr ',' '\n' | wc -l)
+
 if [ -d "$CHECKPOINT_DIR" ]; then
     # Count checkpoint directories
     CHECKPOINT_COUNT=$(find "$CHECKPOINT_DIR" -maxdepth 1 -type d -name "checkpoint-*" 2>/dev/null | wc -l)
@@ -101,10 +109,13 @@ if [ -d "$CHECKPOINT_DIR" ]; then
     fi
 fi
 
+echo "🚀 Launching training on $NUM_GPUS GPUs..."
+echo ""
+
 # Launch with config file
 accelerate launch \
     --num_machines 1 \
-    --num_processes 4 \
+    --num_processes $NUM_GPUS \
     --machine_rank 0 \
     --main_process_ip localhost \
     --main_process_port 29500 \

@@ -1,0 +1,40 @@
+# Local gitignore for CPT-GLM-4.5-AIR-QLoRA
+# Ignore model checkpoints, adapters, large artifacts and runtime logs
+
+# training outputs / checkpoints / adapters
+glm45-air-cpt-qlora/
+glm45-air-cpt-qlora/logs/
+glm45-air-cpt-qlora/checkpoint-*/
+best-glm45-adapter/
+
+# log & runtime artifacts
+*.log
+*.out
+*.err
+*.jsonl
+
+# model weights / binaries
+*.pt
+*.pth
+*.bin
+*.ckpt
+
+# caches, python compiled files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# editor / env
+.env
+.venv/
+venv/
+env/
+
+# dataset / HF caches (if someone accidentally puts them here)
+.cache/
+
+# ignore local generated dashboard assets
+templates/
+
+# Jupyter
+.ipynb_checkpoints/
