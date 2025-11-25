@@ -1,0 +1,39 @@
+# Core dependencies for TPU Fine-Tuning with Qwen2.5-Coder-7B-Instruct
+# ========================================================================
+# Optimized for 8 x v6e TPUs
+# Tested on Python 3.10
+
+# Deep Learning Framework - TPU Optimized
+torch==2.9.1
+torch-xla[tpu]==2.9.0          # TPU support for PyTorch
+transformers==4.57.2
+accelerate>=0.25.0
+peft==0.18.0                   # For LoRA training
+
+# Dataset and Data Processing
+datasets>=2.14.0
+tokenizers>=0.15.0
+pyyaml>=6.0
+tqdm==4.67.1
+
+# Training utilities
+wandb==0.23.0                  # For experiment tracking and live metrics
+
+# TPU-specific packages
+cloud-tpu-client>=0.10         # TPU client library
+
+# General utilities
+numpy>=1.24.0
+
+# Tokenization
+sentencepiece>=0.1.99          # For tokenization
+protobuf>=3.20.0               # Protocol buffers for TPU communication
+
+# Standard library (included for completeness)
+# These are built-in but listed for documentation:
+# - json (built-in)
+# - yaml (via pyyaml)
+# - pathlib (built-in)
+# - logging (built-in)
+# - math (built-in)
+
