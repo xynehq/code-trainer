@@ -19,7 +19,7 @@ training:
 optimization:
   micro_batch_per_gpu: 1
   grad_accum_steps: 16
-  learning_rate: 5.0e-5
+  learning_rate: 5.0e-4
   weight_decay: 0.01
   max_grad_norm: 1.0
   warmup_ratio: 0.08  # 8% of total updates (optimal for MoE + 4-bit)
