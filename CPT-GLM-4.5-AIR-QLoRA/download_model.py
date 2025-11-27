@@ -8,8 +8,8 @@ def download_glm_model():
     """Download GLM-4.5-Air model to local directory"""
     
     # Model configuration
-    model_name = "Qwen/Qwen3-8B"
-    local_path = "/workspace/Avinash/models/Qwen3-8B"
+    model_name = "zai-org/GLM-4.5-Air"
+    local_path = "/workspace/Avinash/models/GLM-4.5-Air"
     
     print(f"=== Downloading GLM-4.5-Air Model ===")
     print(f"Source: {model_name}")
