@@ -41,7 +41,7 @@ def setup_distributed():
     """Initialize distributed training with NCCL backend"""
     if not dist.is_initialized():
         # Extended timeout for multinode setups
-        timeout = timedelta(minutes=30)
+        timeout = timedelta(minutes=180)
         dist.init_process_group(backend="nccl", timeout=timeout)
     
     local_rank = int(os.environ["LOCAL_RANK"])
@@ -404,51 +404,84 @@ def save_checkpoint(model, tokenizer, optimizer, scheduler, output_dir, step, ra
     
     # ============================================================
     # MODE 1: LITE SAVE (Fast - 10 seconds)
-    # Only saves LoRA adapters for model inference/testing
+    # ROBUST FIX: Manual LoRA filtering from FSDP state dict
     # ============================================================
     if checkpoint_mode == 'lite':
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType, ShardedStateDictConfig
+        from safetensors.torch import save_file
+        
+        # All ranks create directory (safe with exist_ok=True)
+        os.makedirs(save_dir, exist_ok=True)
+        
         if rank == 0:
-            print(f"Saving LoRA adapters only (bypassing FSDP gather)...")
+            print(f"⚡ SHARDED CHECKPOINT (Network Bypass Mode)...")
         
-        # CRITICAL FIX: Use PEFT's get_peft_model_state_dict()
-        # This extracts ONLY LoRA params WITHOUT triggering FSDP's all-gather!
-        from peft import get_peft_model_state_dict
+        # ============================================================
+        # SHARDED SAVE: Zero Network Traffic, Parallel I/O
+        # Each GPU saves its own ~15MB LoRA shard independently
+        # ============================================================
         
-        # Extract LoRA state dict (this is LOCAL to each rank, no gathering!)
-        peft_state_dict = get_peft_model_state_dict(model)
+        # 1. Config: Offload to CPU to save VRAM
+        save_policy = ShardedStateDictConfig(offload_to_cpu=True)
         
-        # Only rank 0 saves to disk
-        if rank == 0:
-            # Get PEFT model for config
-            if hasattr(model, 'module'):
-                peft_model = model.module
-            else:
-                peft_model = model
+        # 2. Get LOCAL shard only - NO network communication!
+        with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT, save_policy):
+            # This returns ONLY the local shard for this GPU (~12GB base + LoRA)
+            cpu_state = model.state_dict()
             
-            # Save LoRA adapters using the extracted state dict
-            # This completely bypasses FSDP state_dict() calls!
-            peft_model.save_pretrained(
-                save_dir,
-                state_dict=peft_state_dict,
-                safe_serialization=True
-            )
+            # 3. Filter: Keep ONLY LoRA keys (reduces to ~15MB per GPU)
+            lora_state = {
+                k: v for k, v in cpu_state.items() 
+                if "lora_" in k or "modules_to_save" in k
+            }
+            
+            # 4. Clean keys and convert ShardedTensor to regular tensors
+            clean_lora_state = {}
+            for k, v in lora_state.items():
+                new_k = k.replace("_fsdp_wrapped_module.", "")
+                # Extract local tensor from ShardedTensor
+                if hasattr(v, 'local_shards') and len(v.local_shards()) > 0:
+                    clean_lora_state[new_k] = v.local_shards()[0].tensor
+                else:
+                    clean_lora_state[new_k] = v
+            
+            # 5. Save unique file per rank (~15MB each)
+            # Files: adapter_model.rank0.safetensors, rank1.safetensors, ...
+            shard_file = f"adapter_model.rank{rank}.safetensors"
+            shard_path = os.path.join(save_dir, shard_file)
+            
+            save_file(clean_lora_state, shard_path)
+            
+            print(f"[Rank {rank}] Saved {len(clean_lora_state)} keys to {shard_file}")
+            
+            # Cleanup
+            del cpu_state
+            del lora_state
+            del clean_lora_state
+            gc.collect()
+        
+        # 6. Metadata (Rank 0 only)
+        if rank == 0:
             tokenizer.save_pretrained(save_dir)
-            
-            # Save metadata
             metadata = {
                 "step": step,
                 "eval_loss": eval_loss,
-                "checkpoint_mode": "lite",
+                "checkpoint_mode": "sharded_lora",
+                "format": "sharded_lora_safetensors",
+                "num_shards": dist.get_world_size(),
                 "timestamp": time.time(),
                 "datetime": datetime.now().isoformat(),
             }
             with open(os.path.join(save_dir, "metadata.json"), "w") as f:
                 json.dump(metadata, f, indent=2)
-            
-            print(f"✓ Saved LoRA adapters to {save_dir}")
-            print(f"{'='*60}")
-            print(f"✅ LITE CHECKPOINT COMPLETE (~5s)")
+        
+        # 7. Final barrier - everyone waits for parallel writes to complete
+        dist.barrier()
+        
+        if rank == 0:
+            print(f"✅ SHARDED CHECKPOINT COMPLETE (~10s)")
             print(f"{'='*60}\n")
+    
     
     # ============================================================
     # MODE 2: FULL SAVE (Slow - 15+ minutes on TCP)
