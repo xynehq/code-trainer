@@ -9,7 +9,7 @@ mkdir -p /workspace/tmp
 mkdir -p /workspace/.cache/huggingface
 
 # Environment setup
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
+export CUDA_VISIBLE_DEVICES=4,5,6,7
 export NCCL_DEBUG=INFO
 export NCCL_IB_DISABLE=0
 export NCCL_NET_GDR_LEVEL=3
@@ -23,8 +23,8 @@ export NCCL_TIMEOUT=7200  # 2 hours in seconds for large model evaluation
 export TORCH_CUDA_ARCH_LIST="9.0"
 export CUDA_LAUNCH_BLOCKING=0
 
-# Memory optimizations
-export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
+# Memory optimizations - FIX for CUDA OOM during model loading
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:128
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 
 # Use workspace for temp files and HuggingFace cache (avoid /tmp crashes)
