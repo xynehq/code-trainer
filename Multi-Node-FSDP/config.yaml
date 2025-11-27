@@ -21,7 +21,7 @@ data:
   text_column: "text"
   
   # Maximum sequence length (tokens will be truncated/padded to this length)
-  max_length: 8192
+  max_length: 16384  # 🔥 Testing 16k!
   
   # Validation split ratio (0.0 to 1.0)
   val_split: 0.1
@@ -35,7 +35,7 @@ training:
   seed: 42
   
   # Number of training epochs
-  num_train_epochs: 1                    # Full training run
+  num_train_epochs: 2                    # Full training run
   
   # Batch size per GPU
   per_device_train_batch_size: 1
@@ -45,7 +45,7 @@ training:
   gradient_accumulation_steps: 2
   
   # Learning rate
-  learning_rate: 4.0e-5
+  learning_rate: 5.0e-5
   
   # Weight decay for regularization
   weight_decay: 0.01
@@ -59,24 +59,23 @@ training:
   # Evaluation strategy: "steps" or "epoch"
   eval_strategy: "steps"
   
-  # Evaluation dataset size ("full" uses all eval samples, "subset" uses reduced set for faster eval)
-  eval_dataset_type: "subset"  # Options: "full" or "subset"
-  eval_subset_size: 200        # Balanced: representative but not too slow
+  # Evaluation configuration
+  eval_dataset_type: "subset"  # "subset" or "full"
+  eval_subset_size: 200  # Number of samples for subset evaluation (ignored if eval_dataset_type="full")
   
-  # Evaluation frequency (if eval_strategy is "steps")
-  eval_steps: 100               # Less frequent for production
+  eval_steps: 50  # PRODUCTION: Evaluate every 50 steps
   
   # Checkpointing frequency (steps)
-  save_steps: 100              # Save every 100 steps
+  save_steps: 100  # PRODUCTION: Save every 100 steps
   
   # Checkpoint mode: "lite" (adapters only, fast) or "full" (optimizer+adapters, slow)
-  checkpoint_mode: "lite"  # Use "lite" for fast experimental iterations
+  checkpoint_mode: "lite"  # Sharded LoRA adapters (~256MB total)
   
-  # Set to true to run evaluation before training starts
-  run_baseline_eval: false     # Skip baseline for faster start
+  # Enable baseline evaluation before training starts
+  run_baseline_eval: true  # Skip baseline for faster start
   
-  # Maximum number of checkpoints to keep (keeps best N based on eval loss)
-  save_total_limit: 5          # Keep more checkpoints for production
+  # Checkpoint management
+  save_total_limit: 10  # PRODUCTION: Keep last 10 checkpoints
   
   # Use bfloat16 mixed precision (recommended for H100/A100)
   bf16: true
