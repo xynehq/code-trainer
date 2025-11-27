@@ -6,7 +6,8 @@ glm45-air-cpt-qlora/
 glm45-air-cpt-qlora/logs/
 glm45-air-cpt-qlora/checkpoint-*/
 best-glm45-adapter/
-
+glm45-air-cpt-qlora-1.2/logs/
+glm45-air-cpt-qlora-1.2/checkpoint-*/
 # log & runtime artifacts
 *.log
 *.out
