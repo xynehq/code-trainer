@@ -1,0 +1,81 @@
+# Configuration Template for Hyperswitch CPT Dataset Generation
+# Copy this to config.yaml and fill in your values
+
+# GitHub API Configuration
+github:
+  # Fine-grained personal access token with repo read permissions
+  api_token: "YOUR_GITHUB_TOKEN_HERE"
+  # Repository to process
+  repo_owner: "juspay"
+  repo_name: "hyperswitch"
+
+# Local Repository Path
+repo:
+  # Path to local clone of hyperswitch repository
+  local_path: "./hyperswitch"
+
+# Model Configuration
+model:
+  # Model identifier for tokenizer
+  name: "zai-org/GLM-4.5-Air"
+  # Maximum tokens per chunk
+  max_chunk_size: 8192
+  # Overlap between chunks (in tokens)
+  chunk_overlap: 512
+
+# Data Collection Settings
+collection:
+  # File patterns to include
+  include_patterns:
+    - "**/*.rs"
+    - "**/*.toml"
+    - "**/*.yaml"
+    - "**/*.yml"
+    - "**/*.json"
+    - "**/Cargo.lock"
+    - "**/*.md"
+  
+  # File patterns to exclude
+  exclude_patterns:
+    - "**/target/**"
+    - "**/node_modules/**"
+    - "**/.git/**"
+    - "**/dist/**"
+  
+  # PR/Commit settings
+  pr_settings:
+    # Include merged PRs
+    include_merged: true
+    # Include closed (non-merged) PRs
+    include_closed: true
+    # Include PR review comments
+    include_reviews: true
+    # Include PR inline comments
+    include_comments: true
+    # Maximum number of PRs to fetch (null for all)
+    max_prs: null
+  
+  # Commit settings
+  commit_settings:
+    # Include all commits (not just PR merges)
+    include_all_commits: true
+    # Maximum commits to process (null for all)
+    max_commits: null
+
+# Output Settings
+output:
+  # Output file path
+  file: "hyperswitch_cpt_dataset.jsonl"
+  # Format: "simple" (just training_content) or "structured" (with metadata)
+  format: "structured"
+  # Compression: null, "gzip", or "bzip2"
+  compression: null
+
+# Performance Settings
+performance:
+  # Number of parallel workers for file processing
+  max_workers: 4
+  # Batch size for API requests
+  api_batch_size: 100
+  # Enable progress bars
+  show_progress: true
